@@ -509,7 +509,7 @@ export default function StockDetailUI({
                                             <XAxis dataKey="date" hide />
                                             <YAxis hide />
                                             <Tooltip
-                                                content={({ active, payload }: { active?: boolean; payload?: any[] }) => {
+                                                content={({ active, payload }: { active?: boolean; payload?: readonly any[] }) => {
                                                     if (active && payload?.[0]) {
                                                         return (
                                                             <div className="bg-gray-900 text-white px-3 py-2 rounded-lg text-sm border border-gray-700 shadow-md">
