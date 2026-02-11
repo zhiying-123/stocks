@@ -1,0 +1,76 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  u_id        Int    @id @default(autoincrement())
+  email       String @unique
+  name        String
+  password    String
+  role        String @default("STUDENT")
+  status      String @default("ACTIVE")
+  access_time Int    @default(0)
+}
+
+model UserWallet {
+  wallet_id  Int      @id @default(autoincrement())
+  u_id       Int      @unique
+  balance    Float
+  currency   String   @default("MYR")
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([u_id])
+}
+
+model StockHolding {
+  holding_id Int      @id @default(autoincrement())
+  u_id       Int
+  symbol     String
+  quantity   Int
+  avg_price  Float
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([u_id, symbol])
+  @@index([u_id])
+  @@index([symbol])
+}
+
+model StockTransaction {
+  transaction_id   Int      @id @default(autoincrement())
+  u_id             Int
+  symbol           String
+  transaction_type String
+  quantity         Int
+  price            Float
+  total_amount     Float
+  currency         String   @default("MYR")
+  transaction_date DateTime @default(now())
+  created_at       DateTime @default(now())
+
+  @@index([u_id])
+  @@index([symbol])
+  @@index([transaction_date])
+}
+
+model StockWatchlist {
+  watchlist_id Int      @id @default(autoincrement())
+  u_id         Int
+  symbol       String
+  added_at     DateTime @default(now())
+
+  @@unique([u_id, symbol])
+  @@index([u_id])
+}
