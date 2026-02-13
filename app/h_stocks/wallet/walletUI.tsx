@@ -33,6 +33,11 @@ export default function WalletUI({
     const [error, setError] = useState('');
     const [converting, setConverting] = useState(false);
     const [showCurrencyMenu, setShowCurrencyMenu] = useState(false);
+    const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+    const [withdrawAmount, setWithdrawAmount] = useState('');
+
+    const [withdrawing, setWithdrawing] = useState(false);
+    const [withdrawSuccess, setWithdrawSuccess] = useState<{ amount: number; newBalance: number } | null>(null);
     const currencyMenuRef = useRef<HTMLDivElement>(null);
 
     // Close currency menu when clicking outside
@@ -215,6 +220,44 @@ export default function WalletUI({
         }
     }
 
+    async function handleWithdraw() {
+        const amount = parseFloat(withdrawAmount);
+        if (!amount || amount <= 0) {
+            setError('Please enter a valid amount');
+            return;
+        }
+
+        if (amount > balance) {
+            setError('Insufficient balance');
+            return;
+        }
+
+        setWithdrawing(true);
+        setError('');
+
+        try {
+            const res = await fetch('/api/wallet/withdraw', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount }),
+            });
+            const data = await res.json();
+
+            if (res.ok) {
+                setWithdrawSuccess({ amount, newBalance: data.newBalance });
+                setShowWithdrawModal(false);
+                setWithdrawAmount('');
+                router.refresh();
+            } else {
+                setError(data.error || 'Withdrawal failed');
+            }
+        } catch {
+            setError('Network error, please try again');
+        } finally {
+            setWithdrawing(false);
+        }
+    }
+
     return (
         <div className="space-y-8">
             {/* Error Message */}
@@ -297,15 +340,26 @@ export default function WalletUI({
                                 }
                             </p>
                         </div>
-                        <Link
-                            href="/h_stocks/wallet/topup"
-                            className="inline-flex items-center gap-2 bg-white text-gray-900 font-semibold text-sm px-5 py-2.5 rounded-xl hover:bg-gray-100 transition-colors shrink-0"
-                        >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
-                            Top Up
-                        </Link>
+                        <div className="flex gap-3">
+                            <Link
+                                href="/h_stocks/wallet/topup"
+                                className="inline-flex items-center gap-2 bg-white text-gray-900 font-semibold text-sm px-5 py-2.5 rounded-xl hover:bg-gray-100 transition-colors shrink-0"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                </svg>
+                                Top Up
+                            </Link>
+                            <button
+                                onClick={() => setShowWithdrawModal(true)}
+                                className="inline-flex items-center gap-2 bg-white/10 text-white font-semibold text-sm px-5 py-2.5 rounded-xl hover:bg-white/20 transition-colors shrink-0 border border-white/20"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                Withdraw
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -413,6 +467,146 @@ export default function WalletUI({
                     </div>
                 )}
             </div>
+
+            {/* Withdrawal Success Message */}
+            {withdrawSuccess && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl p-8 max-w-md w-full text-center">
+                        <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-5">
+                            <svg className="w-8 h-8 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                        </div>
+                        <h2 className="text-xl font-bold text-gray-900 mb-1">Withdrawal Successful!</h2>
+                        <p className="text-sm text-gray-400 mb-6">
+                            Your withdrawal request has been submitted and will be processed within 1-3 business days
+                        </p>
+
+                        <div className="bg-gray-50 rounded-xl p-5 mb-6 space-y-3">
+                            <div className="flex justify-between">
+                                <span className="text-xs text-gray-400">Withdrawn Amount</span>
+                                <span className="text-sm font-bold text-gray-900">
+                                    {currency} {withdrawSuccess.amount.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
+                                </span>
+                            </div>
+                            <div className="border-t border-gray-200" />
+                            <div className="flex justify-between">
+                                <span className="text-xs text-gray-400">Remaining Balance</span>
+                                <span className="text-sm font-bold text-emerald-600">
+                                    {currency} {withdrawSuccess.newBalance.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
+                                </span>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={() => setWithdrawSuccess(null)}
+                            className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-gray-900 text-white hover:bg-gray-800 transition-colors"
+                        >
+                            Done
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Withdrawal Modal */}
+            {showWithdrawModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl p-8 max-w-md w-full">
+                        <div className="flex items-center justify-between mb-6">
+                            <h2 className="text-xl font-bold text-gray-900">Withdraw Funds</h2>
+                            <button
+                                onClick={() => {
+                                    setShowWithdrawModal(false);
+                                    setWithdrawAmount('');
+                                    setError('');
+                                }}
+                                className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center transition-colors"
+                            >
+                                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">Withdrawal Amount</label>
+                                <div className="relative">
+                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-base font-bold text-gray-400">
+                                        {currency}
+                                    </span>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        max={balance}
+                                        step="0.01"
+                                        placeholder="0.00"
+                                        value={withdrawAmount}
+                                        onChange={(e) => {
+                                            setWithdrawAmount(e.target.value);
+                                            setError('');
+                                        }}
+                                        className="w-full pl-14 pr-4 py-4 rounded-xl border border-gray-200 text-lg font-bold text-gray-900 placeholder:text-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
+                                    />
+                                </div>
+                                <p className="text-xs text-gray-400 mt-2">
+                                    Available: {currency} {balance.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
+                                </p>
+                            </div>
+
+                            {error && (
+                                <div className="rounded-xl px-4 py-3 text-sm font-medium flex items-center gap-2 bg-red-50 text-red-700 border border-red-100">
+                                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    {error}
+                                </div>
+                            )}
+
+                            <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
+                                <p className="text-xs text-blue-800">
+                                    <strong>Note:</strong> Withdrawal requests are processed within 1-3 business days.
+                                </p>
+                            </div>
+
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => {
+                                        setShowWithdrawModal(false);
+                                        setWithdrawAmount('');
+                                        setError('');
+                                    }}
+                                    className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleWithdraw}
+                                    disabled={withdrawing || !withdrawAmount || parseFloat(withdrawAmount) <= 0}
+                                    className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                                >
+                                    {withdrawing ? (
+                                        <>
+                                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                            </svg>
+                                            Processing...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                            </svg>
+                                            Confirm Withdrawal
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

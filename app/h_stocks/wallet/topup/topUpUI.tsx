@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
 const PRESET_AMOUNTS = [50, 100, 200, 500, 1000, 2000];
@@ -14,11 +14,54 @@ export default function TopUpUI({
     currency: string;
 }) {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const [customAmount, setCustomAmount] = useState('');
     const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState<{ amount: number; newBalance: number } | null>(null);
     const [error, setError] = useState('');
+
+    // Check for Stripe redirect results
+    useEffect(() => {
+        const successParam = searchParams.get('success');
+        const canceledParam = searchParams.get('canceled');
+        const amountParam = searchParams.get('amount');
+
+        if (successParam === 'true' && amountParam) {
+            // Payment successful - update balance immediately
+            const amount = parseFloat(amountParam);
+
+            async function completeTopUp() {
+                try {
+                    const res = await fetch('/api/wallet/topup-complete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ amount }),
+                    });
+                    const data = await res.json();
+
+                    if (res.ok) {
+                        setSuccess({
+                            amount: amount,
+                            newBalance: data.newBalance
+                        });
+                        router.refresh();
+                    } else {
+                        setError('Payment successful but balance update failed. Please refresh the page.');
+                    }
+                } catch {
+                    setError('Payment successful but balance update failed. Please refresh the page.');
+                }
+            }
+
+            completeTopUp();
+            // Clear URL parameters
+            window.history.replaceState({}, '', '/h_stocks/wallet/topup');
+        } else if (canceledParam === 'true') {
+            setError('Payment was canceled');
+            window.history.replaceState({}, '', '/h_stocks/wallet/topup');
+        }
+    }, [searchParams, router]);
 
     const topUpAmount = selectedPreset ?? (customAmount ? parseFloat(customAmount) : 0);
 
@@ -39,22 +82,24 @@ export default function TopUpUI({
         setError('');
 
         try {
-            const res = await fetch('/api/wallet/topup', {
+            // Create Stripe Checkout Session
+            const res = await fetch('/api/wallet/stripe-checkout', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ amount: topUpAmount }),
+                body: JSON.stringify({ amount: topUpAmount, currency }),
             });
             const data = await res.json();
-            console.log("[TOP-UP UI] API response:", data);
-            if (res.ok) {
-                console.log("[TOP-UP UI] Top-up successful. Amount:", topUpAmount, "New Balance:", data.newBalance);
-                setSuccess({ amount: topUpAmount, newBalance: data.newBalance });
+            console.log("[TOP-UP UI] Stripe checkout response:", data);
+
+            if (res.ok && data.url) {
+                // Redirect to Stripe Checkout
+                window.location.href = data.url;
             } else {
-                setError(data.error || 'Top-up failed');
+                setError(data.error || 'Failed to create checkout session');
+                setLoading(false);
             }
         } catch {
             setError('Network error, please try again');
-        } finally {
             setLoading(false);
         }
     }
