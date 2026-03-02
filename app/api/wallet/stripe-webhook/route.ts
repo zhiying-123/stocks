@@ -3,9 +3,14 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import prisma from "@/lib/prisma";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-    apiVersion: "2026-01-28.clover",
-});
+function getStripe() {
+    if (!process.env.STRIPE_SECRET_KEY) {
+        throw new Error("STRIPE_SECRET_KEY is not configured");
+    }
+    return new Stripe(process.env.STRIPE_SECRET_KEY, {
+        apiVersion: "2026-01-28.clover",
+    });
+}
 
 // This is your Stripe webhook secret (you'll need to add this to .env after setting up webhook in Stripe dashboard)
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || "";
@@ -23,6 +28,7 @@ export async function POST(req: NextRequest) {
 
         try {
             // Verify webhook signature
+            const stripe = getStripe();
             event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
         } catch (err: any) {
             console.error("[WEBHOOK SIGNATURE ERROR]", err.message);
