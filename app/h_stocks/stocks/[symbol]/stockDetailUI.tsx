@@ -7,6 +7,7 @@ import {
     ComposedChart,
     Area,
     Bar,
+    Line,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -84,6 +85,20 @@ export default function StockDetailUI({
     const [buying, setBuying] = useState(false);
     const [buyError, setBuyError] = useState('');
     const [buySuccess, setBuySuccess] = useState(false);
+    const [showMA7, setShowMA7] = useState(false);
+    const [showMA20, setShowMA20] = useState(false);
+    const [showMA30, setShowMA30] = useState(false);
+    const [showMA60, setShowMA60] = useState(false);
+    
+    // Alert states
+    const [showAlertModal, setShowAlertModal] = useState(false);
+    const [alertType, setAlertType] = useState<'TARGET_PRICE' | 'PERCENTAGE_CHANGE'>('TARGET_PRICE');
+    const [alertCondition, setAlertCondition] = useState<'ABOVE' | 'BELOW'>('ABOVE');
+    const [targetPrice, setTargetPrice] = useState('');
+    const [percentageChange, setPercentageChange] = useState('');
+    const [creatingAlert, setCreatingAlert] = useState(false);
+    const [alertError, setAlertError] = useState('');
+    const [alertSuccess, setAlertSuccess] = useState(false);
 
     const isPositive = quote.d >= 0;
     const changeColor = isPositive ? 'text-emerald-600' : 'text-red-600';
@@ -183,6 +198,68 @@ export default function StockDetailUI({
         }
     }
 
+    // Handle create alert
+    async function handleCreateAlert() {
+        if (!isLoggedIn) {
+            window.location.href = '/login';
+            return;
+        }
+
+        setCreatingAlert(true);
+        setAlertError('');
+
+        try {
+            const payload: any = {
+                symbol: symbol,
+                alertType: alertType,
+                condition: alertCondition,
+            };
+
+            if (alertType === 'TARGET_PRICE') {
+                const price = parseFloat(targetPrice);
+                if (!price || price <= 0) {
+                    setAlertError('Please enter a valid target price');
+                    setCreatingAlert(false);
+                    return;
+                }
+                payload.targetPrice = price;
+            } else {
+                const percent = parseFloat(percentageChange);
+                if (!percent || percent <= 0) {
+                    setAlertError('Please enter a valid percentage');
+                    setCreatingAlert(false);
+                    return;
+                }
+                payload.percentageChange = percent;
+            }
+
+            const res = await fetch('/api/alerts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            const data = await res.json();
+
+            if (res.ok) {
+                setAlertSuccess(true);
+                setTimeout(() => {
+                    setShowAlertModal(false);
+                    setAlertSuccess(false);
+                    setTargetPrice('');
+                    setPercentageChange('');
+                }, 2000);
+            } else {
+                setAlertError(data.error || 'Failed to create alert');
+            }
+        } catch (error) {
+            console.error('Failed to create alert:', error);
+            setAlertError('Network error, please try again');
+        } finally {
+            setCreatingAlert(false);
+        }
+    }
+
     // Get candle data based on time range
     const getFilteredData = useMemo(() => {
         const sourceData = ['1W', '1M'].includes(timeRange) ? dailyCandles : monthlyCandles;
@@ -229,6 +306,31 @@ export default function StockDetailUI({
             })
             .filter((d): d is ChartDataPoint => d !== null);
     }, [timeRange, dailyCandles, monthlyCandles]);
+
+    // Calculate moving average data for chart
+    const chartDataWithMA = useMemo(() => {
+        if (getFilteredData.length === 0) return [];
+
+        return getFilteredData.map((dataPoint, index) => {
+            const closes = getFilteredData.slice(0, index + 1).map(d => d.close);
+
+            // Calculate MA for each period
+            const calcMA = (n: number) => {
+                const actualN = Math.min(n, closes.length);
+                if (actualN === 0) return null;
+                const slice = closes.slice(-actualN);
+                return slice.reduce((a, b) => a + b, 0) / actualN;
+            };
+
+            return {
+                ...dataPoint,
+                ma7: closes.length >= 7 ? calcMA(7) : null,
+                ma20: closes.length >= 20 ? calcMA(20) : null,
+                ma30: closes.length >= 30 ? calcMA(30) : null,
+                ma60: closes.length >= 60 ? calcMA(60) : null,
+            };
+        });
+    }, [getFilteredData]);
 
     // Calculate statistics
     const stats = useMemo(() => {
@@ -339,6 +441,23 @@ export default function StockDetailUI({
                         </svg>
                         {!isLoggedIn ? 'Login to Watch' : isInWatchlist ? 'In Watchlist' : 'Add to Watchlist'}
                     </button>
+
+                    {/* Set Price Alert */}
+                    <button
+                        onClick={() => {
+                            if (!isLoggedIn) {
+                                window.location.href = '/login';
+                            } else {
+                                setShowAlertModal(true);
+                            }
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all shadow-sm bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                        </svg>
+                        {!isLoggedIn ? 'Login for Alerts' : 'Set Alert'}
+                    </button>
                 </div>
             </div>
 
@@ -398,7 +517,7 @@ export default function StockDetailUI({
 
             {/* Chart Section */}
             <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-8">
-                <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
+                <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
                     {/* Time Range Selector */}
                     <div className="flex gap-2">
                         {timeRanges.map(({ key, label }) => (
@@ -438,6 +557,77 @@ export default function StockDetailUI({
                     </div>
                 </div>
 
+                {/* Moving Averages Toggle */}
+                <div className="mb-6 pb-6 border-b border-gray-100">
+                    <p className="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wide">Moving Averages:</p>
+                    <div className="flex gap-3 flex-wrap">
+                        <button
+                            onClick={() => setShowMA7(!showMA7)}
+                            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all border-2 ${showMA7
+                                    ? 'bg-blue-500 text-white border-blue-500'
+                                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
+                                }`}
+                        >
+                            <span className="flex items-center gap-2">
+                                {showMA7 && (
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                )}
+                                MA 7
+                            </span>
+                        </button>
+                        <button
+                            onClick={() => setShowMA20(!showMA20)}
+                            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all border-2 ${showMA20
+                                    ? 'bg-purple-500 text-white border-purple-500'
+                                    : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300'
+                                }`}
+                        >
+                            <span className="flex items-center gap-2">
+                                {showMA20 && (
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                )}
+                                MA 20
+                            </span>
+                        </button>
+                        <button
+                            onClick={() => setShowMA30(!showMA30)}
+                            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all border-2 ${showMA30
+                                    ? 'bg-orange-500 text-white border-orange-500'
+                                    : 'bg-white text-gray-600 border-gray-200 hover:border-orange-300'
+                                }`}
+                        >
+                            <span className="flex items-center gap-2">
+                                {showMA30 && (
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                )}
+                                MA 30
+                            </span>
+                        </button>
+                        <button
+                            onClick={() => setShowMA60(!showMA60)}
+                            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all border-2 ${showMA60
+                                    ? 'bg-pink-500 text-white border-pink-500'
+                                    : 'bg-white text-gray-600 border-gray-200 hover:border-pink-300'
+                                }`}
+                        >
+                            <span className="flex items-center gap-2">
+                                {showMA60 && (
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                )}
+                                MA 60
+                            </span>
+                        </button>
+                    </div>
+                </div>
+
                 {/* Main Content - Chart or Table */}
                 {getFilteredData.length > 0 ? (
                     viewMode === 'chart' ? (
@@ -449,7 +639,7 @@ export default function StockDetailUI({
                                     Price Trend
                                 </h3>
                                 <ResponsiveContainer width="100%" height={400}>
-                                    <ComposedChart data={getFilteredData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                                    <ComposedChart data={chartDataWithMA} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                                         <defs>
                                             <linearGradient id="colorGreen" x1="0" y1="0" x2="0" y2="1">
                                                 <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
@@ -493,6 +683,50 @@ export default function StockDetailUI({
                                             strokeWidth={2}
                                             fill={stats?.periodChangePositive ? "url(#colorGreen)" : "url(#colorRed)"}
                                         />
+                                        {showMA7 && (
+                                            <Line
+                                                type="monotone"
+                                                dataKey="ma7"
+                                                stroke="#3b82f6"
+                                                strokeWidth={2}
+                                                dot={false}
+                                                connectNulls
+                                                name="MA 7"
+                                            />
+                                        )}
+                                        {showMA20 && (
+                                            <Line
+                                                type="monotone"
+                                                dataKey="ma20"
+                                                stroke="#a855f7"
+                                                strokeWidth={2}
+                                                dot={false}
+                                                connectNulls
+                                                name="MA 20"
+                                            />
+                                        )}
+                                        {showMA30 && (
+                                            <Line
+                                                type="monotone"
+                                                dataKey="ma30"
+                                                stroke="#f97316"
+                                                strokeWidth={2}
+                                                dot={false}
+                                                connectNulls
+                                                name="MA 30"
+                                            />
+                                        )}
+                                        {showMA60 && (
+                                            <Line
+                                                type="monotone"
+                                                dataKey="ma60"
+                                                stroke="#ec4899"
+                                                strokeWidth={2}
+                                                dot={false}
+                                                connectNulls
+                                                name="MA 60"
+                                            />
+                                        )}
                                     </ComposedChart>
                                 </ResponsiveContainer>
                             </div>
@@ -1044,6 +1278,218 @@ export default function StockDetailUI({
                                 {/* Disclaimer */}
                                 <p className="mt-4 text-xs text-center text-gray-400">
                                     By confirming, you agree to purchase at the current market price.
+                                </p>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Price Alert Modal */}
+            {showAlertModal && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative animate-in fade-in zoom-in duration-200">
+                        {/* Close button */}
+                        <button
+                            onClick={() => {
+                                setShowAlertModal(false);
+                                setAlertError('');
+                                setTargetPrice('');
+                                setPercentageChange('');
+                            }}
+                            className="absolute top-4 right-4 p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+
+                        {alertSuccess ? (
+                            /* Success Screen */
+                            <div className="text-center py-6">
+                                <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center mx-auto mb-4">
+                                    <svg className="w-8 h-8 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                                    </svg>
+                                </div>
+                                <h3 className="text-xl font-bold text-gray-900 mb-2">Alert Created!</h3>
+                                <p className="text-sm text-gray-500">You'll be notified when the condition is met.</p>
+                            </div>
+                        ) : (
+                            /* Alert Form */
+                            <>
+                                <div className="mb-6">
+                                    <h3 className="text-xl font-bold text-gray-900 mb-1">Set Price Alert for {symbol}</h3>
+                                    <p className="text-sm text-gray-500">Get notified when your price target is reached</p>
+                                </div>
+
+                                {/* Current Price */}
+                                <div className="bg-gray-50 rounded-xl p-4 mb-6">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm text-gray-600">Current Price</span>
+                                        <span className="text-lg font-bold text-gray-900">${quote.c.toFixed(2)}</span>
+                                    </div>
+                                </div>
+
+                                {/* Alert Type */}
+                                <div className="mb-6">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-3">Alert Type</label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button
+                                            onClick={() => {
+                                                setAlertType('TARGET_PRICE');
+                                                setAlertError('');
+                                            }}
+                                            className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
+                                                alertType === 'TARGET_PRICE'
+                                                    ? 'bg-orange-600 text-white shadow-md'
+                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
+                                        >
+                                            Target Price
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setAlertType('PERCENTAGE_CHANGE');
+                                                setAlertError('');
+                                            }}
+                                            className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
+                                                alertType === 'PERCENTAGE_CHANGE'
+                                                    ? 'bg-orange-600 text-white shadow-md'
+                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
+                                        >
+                                            % Change
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Condition */}
+                                <div className="mb-6">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-3">Condition</label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button
+                                            onClick={() => {
+                                                setAlertCondition('ABOVE');
+                                                setAlertError('');
+                                            }}
+                                            className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
+                                                alertCondition === 'ABOVE'
+                                                    ? 'bg-green-600 text-white shadow-md'
+                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
+                                        >
+                                            ↑ Above / Rise
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setAlertCondition('BELOW');
+                                                setAlertError('');
+                                            }}
+                                            className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
+                                                alertCondition === 'BELOW'
+                                                    ? 'bg-red-600 text-white shadow-md'
+                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            }`}
+                                        >
+                                            ↓ Below / Drop
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Value Input */}
+                                {alertType === 'TARGET_PRICE' ? (
+                                    <div className="mb-6">
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Target Price ($)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="0.01"
+                                            step="0.01"
+                                            value={targetPrice}
+                                            onChange={(e) => {
+                                                setTargetPrice(e.target.value);
+                                                setAlertError('');
+                                            }}
+                                            className="w-full px-4 py-3 rounded-xl border border-gray-200 text-lg font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                                            placeholder="Enter target price"
+                                        />
+                                        <p className="mt-2 text-xs text-gray-500">
+                                            Alert will trigger when price {alertCondition === 'ABOVE' ? 'rises above' : 'falls below'} this value
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="mb-6">
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Percentage Change (%)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="0.1"
+                                            step="0.1"
+                                            value={percentageChange}
+                                            onChange={(e) => {
+                                                setPercentageChange(e.target.value);
+                                                setAlertError('');
+                                            }}
+                                            className="w-full px-4 py-3 rounded-xl border border-gray-200 text-lg font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                                            placeholder="Enter percentage"
+                                        />
+                                        <p className="mt-2 text-xs text-gray-500">
+                                            Alert will trigger when price {alertCondition === 'ABOVE' ? 'increases' : 'decreases'} by this percentage
+                                        </p>
+                                    </div>
+                                )}
+
+                                {/* Error Message */}
+                                {alertError && (
+                                    <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200">
+                                        <p className="text-sm text-red-600 font-medium">{alertError}</p>
+                                    </div>
+                                )}
+
+                                {/* Action Buttons */}
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => {
+                                            setShowAlertModal(false);
+                                            setAlertError('');
+                                            setTargetPrice('');
+                                            setPercentageChange('');
+                                        }}
+                                        disabled={creatingAlert}
+                                        className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleCreateAlert}
+                                        disabled={creatingAlert || (alertType === 'TARGET_PRICE' ? !targetPrice : !percentageChange)}
+                                        className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                                    >
+                                        {creatingAlert ? (
+                                            <>
+                                                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                                </svg>
+                                                Creating...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                                                </svg>
+                                                Create Alert
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+
+                                {/* Info */}
+                                <p className="mt-4 text-xs text-center text-gray-400">
+                                    You'll receive an email notification when the alert is triggered.
                                 </p>
                             </>
                         )}

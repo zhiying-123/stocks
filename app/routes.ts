@@ -36,6 +36,22 @@ export const stockRoutes: RouteConfig[] = [
         requiresAuth: true
     },
     {
+        path: "/h_stocks/portfolio",
+        label: "Portfolio Analytics",
+        icon: "📈",
+        description: "Detailed analysis of your investments with charts and risk metrics",
+        color: "indigo",
+        requiresAuth: true
+    },
+    {
+        path: "/h_stocks/alerts",
+        label: "Price Alerts",
+        icon: "🔔",
+        description: "Set price alerts and get notified when your target is reached",
+        color: "orange",
+        requiresAuth: true
+    },
+    {
         path: "/h_stocks/wallet",
         label: "Wallet",
         icon: "💰",

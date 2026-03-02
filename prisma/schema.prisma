@@ -74,3 +74,25 @@ model StockWatchlist {
   @@unique([u_id, symbol])
   @@index([u_id])
 }
+
+model PriceAlert {
+  alert_id          Int       @id @default(autoincrement())
+  u_id              Int
+  symbol            String
+  alert_type        String    // "TARGET_PRICE" or "PERCENTAGE_CHANGE"
+  condition         String    // "ABOVE" or "BELOW"
+  target_price      Float?
+  percentage_change Float?
+  reference_price   Float?    // Price when alert was created (for percentage change)
+  is_active         Boolean   @default(true)
+  is_triggered      Boolean   @default(false)
+  triggered_at      DateTime?
+  triggered_price   Float?
+  notified          Boolean   @default(false)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  @@index([u_id])
+  @@index([symbol])
+  @@index([is_active, is_triggered])
+}

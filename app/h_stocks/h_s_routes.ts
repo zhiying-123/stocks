@@ -27,6 +27,12 @@ export const investmentRoutes: InvestmentRouteConfig[] = [
         description: "View your purchased stocks"
     },
     {
+        path: "/h_stocks/portfolio",
+        label: "Portfolio Analytics",
+        icon: "📈",
+        description: "Analyze your investment performance"
+    },
+    {
         path: "/h_stocks/wallet",
         label: "Wallet",
         icon: "💰",

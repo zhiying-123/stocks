@@ -40,6 +40,14 @@ export default function WalletUI({
     const [withdrawSuccess, setWithdrawSuccess] = useState<{ amount: number; newBalance: number } | null>(null);
     const currencyMenuRef = useRef<HTMLDivElement>(null);
 
+    // Export report states
+    const [showExportModal, setShowExportModal] = useState(false);
+    const [exportFormat, setExportFormat] = useState<'csv' | 'json'>('csv');
+    const [exportType, setExportType] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
+    const [exportStartDate, setExportStartDate] = useState('');
+    const [exportEndDate, setExportEndDate] = useState('');
+    const [exporting, setExporting] = useState(false);
+
     // Close currency menu when clicking outside
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
@@ -258,6 +266,55 @@ export default function WalletUI({
         }
     }
 
+    async function handleExportReport() {
+        setExporting(true);
+        setError('');
+
+        try {
+            const params = new URLSearchParams();
+            params.append('format', exportFormat);
+            if (exportType !== 'ALL') {
+                params.append('type', exportType);
+            }
+            if (exportStartDate) {
+                params.append('startDate', exportStartDate);
+            }
+            if (exportEndDate) {
+                params.append('endDate', exportEndDate);
+            }
+
+            const res = await fetch(`/api/wallet/export-report?${params.toString()}`);
+
+            if (res.ok) {
+                // Download the file
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `transactions_${new Date().toISOString().split('T')[0]}.${exportFormat}`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+                setShowExportModal(false);
+                // Reset filters
+                setExportFormat('csv');
+                setExportType('ALL');
+                setExportStartDate('');
+                setExportEndDate('');
+            } else {
+                const data = await res.json();
+                setError(data.error || 'Export failed');
+            }
+        } catch (err) {
+            console.error('Export error:', err);
+            setError('Network error, please try again');
+        } finally {
+            setExporting(false);
+        }
+    }
+
     return (
         <div className="space-y-8">
             {/* Error Message */}
@@ -406,9 +463,22 @@ export default function WalletUI({
 
             {/* Transaction History */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
-                    <div className="w-1.5 h-5 rounded-full bg-gray-900" />
-                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Transaction History</h3>
+                <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <div className="w-1.5 h-5 rounded-full bg-gray-900" />
+                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Transaction History</h3>
+                    </div>
+                    {transactions.length > 0 && (
+                        <button
+                            onClick={() => setShowExportModal(true)}
+                            className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors border border-gray-200"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            Export Report
+                        </button>
+                    )}
                 </div>
 
                 {transactions.length === 0 ? (
@@ -599,6 +669,170 @@ export default function WalletUI({
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                             </svg>
                                             Confirm Withdrawal
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Export Report Modal */}
+            {showExportModal && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl p-8 max-w-lg w-full shadow-2xl">
+                        <div className="flex items-center justify-between mb-6">
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-900">Export Transaction Report</h2>
+                                <p className="text-sm text-gray-400 mt-1">Download your transaction history</p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setShowExportModal(false);
+                                    setError('');
+                                }}
+                                className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center transition-colors"
+                            >
+                                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className="space-y-5">
+                            {/* Format Selection */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-3">Export Format</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        onClick={() => setExportFormat('csv')}
+                                        className={`p-4 rounded-xl border-2 transition-all ${exportFormat === 'csv'
+                                                ? 'border-gray-900 bg-gray-50'
+                                                : 'border-gray-200 hover:border-gray-300'
+                                            }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${exportFormat === 'csv' ? 'bg-emerald-100' : 'bg-gray-100'
+                                                }`}>
+                                                <svg className={`w-5 h-5 ${exportFormat === 'csv' ? 'text-emerald-600' : 'text-gray-400'
+                                                    }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                </svg>
+                                            </div>
+                                            <div className="text-left">
+                                                <p className="text-sm font-bold text-gray-900">CSV</p>
+                                                <p className="text-xs text-gray-400">Excel compatible</p>
+                                            </div>
+                                        </div>
+                                    </button>
+                                    <button
+                                        onClick={() => setExportFormat('json')}
+                                        className={`p-4 rounded-xl border-2 transition-all ${exportFormat === 'json'
+                                                ? 'border-gray-900 bg-gray-50'
+                                                : 'border-gray-200 hover:border-gray-300'
+                                            }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${exportFormat === 'json' ? 'bg-blue-100' : 'bg-gray-100'
+                                                }`}>
+                                                <svg className={`w-5 h-5 ${exportFormat === 'json' ? 'text-blue-600' : 'text-gray-400'
+                                                    }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                                                </svg>
+                                            </div>
+                                            <div className="text-left">
+                                                <p className="text-sm font-bold text-gray-900">JSON</p>
+                                                <p className="text-xs text-gray-400">With summary</p>
+                                            </div>
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Transaction Type Filter */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-3">Transaction Type</label>
+                                <div className="flex gap-2">
+                                    {(['ALL', 'BUY', 'SELL'] as const).map((type) => (
+                                        <button
+                                            key={type}
+                                            onClick={() => setExportType(type)}
+                                            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${exportType === type
+                                                    ? 'bg-gray-900 text-white'
+                                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
+                                                }`}
+                                        >
+                                            {type === 'ALL' ? 'All' : type}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Date Range Filter */}
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-3">Date Range (Optional)</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs text-gray-500 mb-1">From</label>
+                                        <input
+                                            type="date"
+                                            value={exportStartDate}
+                                            onChange={(e) => setExportStartDate(e.target.value)}
+                                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-gray-500 mb-1">To</label>
+                                        <input
+                                            type="date"
+                                            value={exportEndDate}
+                                            onChange={(e) => setExportEndDate(e.target.value)}
+                                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {error && (
+                                <div className="rounded-xl px-4 py-3 text-sm font-medium flex items-center gap-2 bg-red-50 text-red-700 border border-red-100">
+                                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    {error}
+                                </div>
+                            )}
+
+                            {/* Action Buttons */}
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                    onClick={() => {
+                                        setShowExportModal(false);
+                                        setError('');
+                                    }}
+                                    className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleExportReport}
+                                    disabled={exporting}
+                                    className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                                >
+                                    {exporting ? (
+                                        <>
+                                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                            </svg>
+                                            Exporting...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                            </svg>
+                                            Export Report
                                         </>
                                     )}
                                 </button>
