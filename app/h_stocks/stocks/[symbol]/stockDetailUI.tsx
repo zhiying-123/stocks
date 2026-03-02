@@ -89,7 +89,7 @@ export default function StockDetailUI({
     const [showMA20, setShowMA20] = useState(false);
     const [showMA30, setShowMA30] = useState(false);
     const [showMA60, setShowMA60] = useState(false);
-    
+
     // Alert states
     const [showAlertModal, setShowAlertModal] = useState(false);
     const [alertType, setAlertType] = useState<'TARGET_PRICE' | 'PERCENTAGE_CHANGE'>('TARGET_PRICE');
@@ -564,8 +564,8 @@ export default function StockDetailUI({
                         <button
                             onClick={() => setShowMA7(!showMA7)}
                             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all border-2 ${showMA7
-                                    ? 'bg-blue-500 text-white border-blue-500'
-                                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
+                                ? 'bg-blue-500 text-white border-blue-500'
+                                : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
                                 }`}
                         >
                             <span className="flex items-center gap-2">
@@ -580,8 +580,8 @@ export default function StockDetailUI({
                         <button
                             onClick={() => setShowMA20(!showMA20)}
                             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all border-2 ${showMA20
-                                    ? 'bg-purple-500 text-white border-purple-500'
-                                    : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300'
+                                ? 'bg-purple-500 text-white border-purple-500'
+                                : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300'
                                 }`}
                         >
                             <span className="flex items-center gap-2">
@@ -596,8 +596,8 @@ export default function StockDetailUI({
                         <button
                             onClick={() => setShowMA30(!showMA30)}
                             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all border-2 ${showMA30
-                                    ? 'bg-orange-500 text-white border-orange-500'
-                                    : 'bg-white text-gray-600 border-gray-200 hover:border-orange-300'
+                                ? 'bg-orange-500 text-white border-orange-500'
+                                : 'bg-white text-gray-600 border-gray-200 hover:border-orange-300'
                                 }`}
                         >
                             <span className="flex items-center gap-2">
@@ -612,8 +612,8 @@ export default function StockDetailUI({
                         <button
                             onClick={() => setShowMA60(!showMA60)}
                             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all border-2 ${showMA60
-                                    ? 'bg-pink-500 text-white border-pink-500'
-                                    : 'bg-white text-gray-600 border-gray-200 hover:border-pink-300'
+                                ? 'bg-pink-500 text-white border-pink-500'
+                                : 'bg-white text-gray-600 border-gray-200 hover:border-pink-300'
                                 }`}
                         >
                             <span className="flex items-center gap-2">
@@ -1340,11 +1340,10 @@ export default function StockDetailUI({
                                                 setAlertType('TARGET_PRICE');
                                                 setAlertError('');
                                             }}
-                                            className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
-                                                alertType === 'TARGET_PRICE'
+                                            className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${alertType === 'TARGET_PRICE'
                                                     ? 'bg-orange-600 text-white shadow-md'
                                                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                            }`}
+                                                }`}
                                         >
                                             Target Price
                                         </button>
@@ -1353,11 +1352,10 @@ export default function StockDetailUI({
                                                 setAlertType('PERCENTAGE_CHANGE');
                                                 setAlertError('');
                                             }}
-                                            className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
-                                                alertType === 'PERCENTAGE_CHANGE'
+                                            className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${alertType === 'PERCENTAGE_CHANGE'
                                                     ? 'bg-orange-600 text-white shadow-md'
                                                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                            }`}
+                                                }`}
                                         >
                                             % Change
                                         </button>
@@ -1373,11 +1371,10 @@ export default function StockDetailUI({
                                                 setAlertCondition('ABOVE');
                                                 setAlertError('');
                                             }}
-                                            className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
-                                                alertCondition === 'ABOVE'
+                                            className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${alertCondition === 'ABOVE'
                                                     ? 'bg-green-600 text-white shadow-md'
                                                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                            }`}
+                                                }`}
                                         >
                                             ↑ Above / Rise
                                         </button>
@@ -1386,11 +1383,10 @@ export default function StockDetailUI({
                                                 setAlertCondition('BELOW');
                                                 setAlertError('');
                                             }}
-                                            className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
-                                                alertCondition === 'BELOW'
+                                            className={`px-4 py-3 rounded-xl text-sm font-semibold transition-all ${alertCondition === 'BELOW'
                                                     ? 'bg-red-600 text-white shadow-md'
                                                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                            }`}
+                                                }`}
                                         >
                                             ↓ Below / Drop
                                         </button>

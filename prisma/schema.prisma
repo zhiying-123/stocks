@@ -79,11 +79,11 @@ model PriceAlert {
   alert_id          Int       @id @default(autoincrement())
   u_id              Int
   symbol            String
-  alert_type        String    // "TARGET_PRICE" or "PERCENTAGE_CHANGE"
-  condition         String    // "ABOVE" or "BELOW"
+  alert_type        String // "TARGET_PRICE" or "PERCENTAGE_CHANGE"
+  condition         String // "ABOVE" or "BELOW"
   target_price      Float?
   percentage_change Float?
-  reference_price   Float?    // Price when alert was created (for percentage change)
+  reference_price   Float? // Price when alert was created (for percentage change)
   is_active         Boolean   @default(true)
   is_triggered      Boolean   @default(false)
   triggered_at      DateTime?

@@ -92,7 +92,7 @@ export default function AlertsUI({ alerts }: AlertsUIProps) {
 
     function AlertCard({ alert }: { alert: Alert }) {
         const priceChange = alert.currentPrice - (alert.reference_price || alert.currentPrice);
-        const priceChangePercent = alert.reference_price 
+        const priceChangePercent = alert.reference_price
             ? ((priceChange / alert.reference_price) * 100).toFixed(2)
             : "0.00";
         const isPositive = priceChange >= 0;
