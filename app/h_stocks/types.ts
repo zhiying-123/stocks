@@ -18,6 +18,7 @@ export interface StockProfile {
     exchange?: string;
     currency?: string;
     marketCapitalization?: number;
+    finnhubIndustry?: string;
 }
 
 export interface Stock {
