@@ -46,13 +46,13 @@ export default async function ProfilePage() {
             <div className="relative rounded-2xl bg-gray-900 p-8 md:p-10 overflow-hidden">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-white/3 rounded-full -translate-y-1/2 translate-x-1/4" />
                 <div className="absolute bottom-0 left-1/4 w-40 h-40 bg-white/2 rounded-full translate-y-1/2" />
-                
+
                 <div className="relative flex flex-col md:flex-row md:items-center gap-6">
                     {/* Avatar */}
                     <div className="w-24 h-24 rounded-2xl bg-white flex items-center justify-center text-gray-900 text-4xl font-bold shadow-xl">
                         {userInitial}
                     </div>
-                    
+
                     {/* User Info */}
                     <div className="flex-1">
                         <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight mb-2">
@@ -91,7 +91,7 @@ export default async function ProfilePage() {
                         </div>
                     </div>
                     <div className="p-6">
-                        <ProfileUI 
+                        <ProfileUI
                             userId={user.id}
                             initialName={user?.name || ""}
                             email={user?.email || ""}

@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
         const cookieStore = await cookies();
         const isLoggedIn = cookieStore.get("auth")?.value === "true";
         const userCookie = cookieStore.get("user")?.value;
-        
+
         if (!isLoggedIn || !userCookie) {
             return NextResponse.json(
                 { error: "Unauthorized" },
