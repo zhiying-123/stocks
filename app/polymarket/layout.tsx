@@ -1,16 +1,14 @@
-// H-Stocks Module Layout
+// Polymarket Module Layout
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-// ==================== Auth State ====================
 async function getAuthState() {
     const cookieStore = await cookies();
     const isLoggedIn = cookieStore.get("auth")?.value === "true";
     return { isLoggedIn };
 }
 
-// ==================== Stocks Module Layout ====================
-export default async function HStocksLayout({
+export default async function PolymarketLayout({
     children,
 }: {
     children: React.ReactNode;

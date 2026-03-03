@@ -1,9 +1,7 @@
-// H-Stocks Investment Platform - Home Page
+// Trading Platform - Home Page
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { stockRoutes } from "./routes";
-import LoginLink from "./components/LoginLink";
-import LogoutButton from "./logout/LogoutButton";
+import { redirect } from "next/navigation";
 
 export const dynamic = 'force-dynamic';
 
@@ -21,153 +19,239 @@ export default async function HomePage() {
   const { isLoggedIn, user } = await getUserInfo();
 
   return (
-    <div className="min-h-screen bg-[#f8f9fb]">
-      {/* Header */}
-      <header className="sticky top-0 z-50 bg-white border-b border-gray-200/60 shadow-sm">
-        <div className="max-w-7xl mx-auto px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-gray-900 flex items-center justify-center shadow-md">
-                <span className="text-white font-bold text-lg">H</span>
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900 tracking-tight">H-Stocks</h1>
-                <p className="text-xs text-gray-500 font-medium">Investment Platform</p>
-              </div>
+    <div className="min-h-screen bg-white">
+      {/* Hero Section */}
+      <div className="relative overflow-hidden">
+        {/* Background Pattern */}
+        <div className="absolute inset-0 bg-linear-to-b from-gray-50 to-white -z-10" />
+        <div className="absolute inset-0 bg-grid-pattern opacity-5 -z-10" />
+
+        {/* Hero Content */}
+        <div className="max-w-7xl mx-auto px-6 py-24 md:py-32">
+          <div className="text-center">
+            {/* Logo */}
+            <div className="flex justify-center mb-8">
+              <div className="text-7xl animate-bounce-slow">🐱</div>
             </div>
 
-            <div className="flex items-center gap-4">
+            {/* Heading */}
+            <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 tracking-tight">
+              Trade Smarter,<br />
+              Win Bigger
+            </h1>
+
+            <p className="text-xl text-gray-600 mb-12 max-w-2xl mx-auto">
+              One unified platform for stock trading and prediction markets.
+              <br />
+              Powered by real-time data and advanced analytics.
+            </p>
+
+            {/* CTA Buttons */}
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               {isLoggedIn ? (
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-3 px-4 py-2 rounded-full bg-gray-50 border border-gray-200">
-                    <span className="text-sm font-medium text-gray-600">{user?.name || user?.email}</span>
-                    <div className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">
-                      {(user?.name || user?.email || 'U').charAt(0).toUpperCase()}
-                    </div>
-                  </div>
-                  <LogoutButton />
-                </div>
+                <>
+                  <Link
+                    href="/h_stocks"
+                    className="px-8 py-4 bg-gray-900 text-white font-semibold rounded-lg hover:bg-gray-800 transition-all shadow-lg hover:shadow-xl w-full sm:w-auto"
+                  >
+                    Go to Stocks
+                  </Link>
+                  <Link
+                    href="/polymarket"
+                    className="px-8 py-4 bg-white text-gray-900 font-semibold rounded-lg border-2 border-gray-900 hover:bg-gray-50 transition-all w-full sm:w-auto"
+                  >
+                    Go to Polymarket
+                  </Link>
+                </>
               ) : (
-                <LoginLink />
+                <>
+                  <Link
+                    href="/login"
+                    className="px-8 py-4 bg-gray-900 text-white font-semibold rounded-lg hover:bg-gray-800 transition-all shadow-lg hover:shadow-xl w-full sm:w-auto"
+                  >
+                    Get Started
+                  </Link>
+                  <Link
+                    href="/login"
+                    className="px-8 py-4 bg-white text-gray-900 font-semibold rounded-lg border-2 border-gray-900 hover:bg-gray-50 transition-all w-full sm:w-auto"
+                  >
+                    Sign In
+                  </Link>
+                </>
               )}
             </div>
-          </div>
-        </div>
-      </header>
 
-      {/* Hero Banner */}
-      <div className="relative bg-linear-to-br from-gray-900 via-gray-800 to-gray-900 border-b border-gray-700">
-        <div className="max-w-7xl mx-auto px-8 py-16 md:py-20">
-          <div className="relative">
-            {/* Decorative elements */}
-            <div className="absolute top-0 right-0 w-80 h-80 bg-white/3 rounded-full -translate-y-1/2 translate-x-1/3 -z-10" />
-            <div className="absolute bottom-0 left-1/3 w-60 h-60 bg-white/2 rounded-full translate-y-1/2 -z-10" />
-
-            <div className="relative text-center">
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 mb-6">
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-xs text-emerald-400 font-medium">Live Market Data</span>
+            {/* Stats */}
+            <div className="mt-20 grid grid-cols-3 gap-8 max-w-3xl mx-auto">
+              <div className="text-center">
+                <div className="text-3xl font-bold text-gray-900">5000+</div>
+                <div className="text-sm text-gray-600 mt-1">Stocks</div>
               </div>
-
-              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 tracking-tight">
-                Welcome to H-Stocks
-              </h2>
-              <p className="text-lg text-gray-400 max-w-2xl mx-auto mb-8">
-                Your gateway to intelligent stock trading and portfolio management.
-                {isLoggedIn ? ' Start trading now!' : ' Login to start trading and manage your investments.'}
-              </p>
-
-              {!isLoggedIn && (
-                <Link
-                  href="/login"
-                  className="inline-flex items-center gap-2 px-8 py-3.5 bg-white text-gray-900 text-sm font-semibold rounded-xl hover:bg-gray-100 transition-all shadow-lg"
-                >
-                  Get Started
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </Link>
-              )}
+              <div className="text-center">
+                <div className="text-3xl font-bold text-gray-900">Real-time</div>
+                <div className="text-sm text-gray-600 mt-1">Data</div>
+              </div>
+              <div className="text-center">
+                <div className="text-3xl font-bold text-gray-900">24/7</div>
+                <div className="text-sm text-gray-600 mt-1">Trading</div>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-8 py-12">
-        {/* Features Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {stockRoutes.map((route) => {
-            const isRestricted = route.requiresAuth && !isLoggedIn;
+      {/* Features Section */}
+      <div className="py-24 bg-gray-50">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+              Two Powerful Platforms, One Wallet
+            </h2>
+            <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+              Seamlessly trade across stocks and prediction markets with a unified balance
+            </p>
+          </div>
 
-            return (
-              <div key={route.path} className="relative group">
-                <Link
-                  href={isRestricted ? '/login' : route.path}
-                  className={`block h-full ${isRestricted ? 'cursor-pointer' : ''}`}
-                >
-                  <div className={`
-                                        bg-white rounded-2xl p-8 border border-gray-200 
-                                        transition-all duration-300 h-full
-                                        ${isRestricted
-                      ? 'opacity-75 hover:opacity-90'
-                      : 'hover:shadow-lg hover:border-gray-300 group-hover:-translate-y-1'
-                    }
-                                    `}>
-                    {/* Icon */}
-                    <div className={`
-                                            w-16 h-16 rounded-xl flex items-center justify-center mb-5
-                                            ${route.color === 'blue' && 'bg-blue-50'}
-                                            ${route.color === 'green' && 'bg-green-50'}
-                                            ${route.color === 'purple' && 'bg-purple-50'}
-                                            ${route.color === 'amber' && 'bg-amber-50'}
-                                            ${isRestricted && 'opacity-50'}
-                                        `}>
-                      <span className="text-3xl">{route.icon}</span>
-                    </div>
+          <div className="grid md:grid-cols-2 gap-8">
+            {/* Stocks Module */}
+            <div className="bg-white rounded-2xl p-8 border-2 border-gray-200 hover:border-gray-900 transition-all group">
+              <div className="text-5xl mb-6">📈</div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-4">Stock Market</h3>
+              <p className="text-gray-600 mb-6 leading-relaxed">
+                Trade thousands of stocks with real-time quotes, advanced analytics,
+                and portfolio tracking. Monitor your investments with price alerts
+                and comprehensive performance metrics.
+              </p>
+              <ul className="space-y-3 mb-8">
+                <li className="flex items-center gap-3 text-sm text-gray-700">
+                  <span className="text-lg">✓</span>
+                  <span>Real-time stock prices</span>
+                </li>
+                <li className="flex items-center gap-3 text-sm text-gray-700">
+                  <span className="text-lg">✓</span>
+                  <span>Portfolio analytics</span>
+                </li>
+                <li className="flex items-center gap-3 text-sm text-gray-700">
+                  <span className="text-lg">✓</span>
+                  <span>Price alerts & notifications</span>
+                </li>
+                <li className="flex items-center gap-3 text-sm text-gray-700">
+                  <span className="text-lg">✓</span>
+                  <span>Performance tracking</span>
+                </li>
+              </ul>
+            </div>
 
-                    {/* Content */}
-                    <div className="mb-4">
-                      <h3 className={`
-                                                text-lg font-semibold mb-2
-                                                ${route.color === 'blue' && 'text-blue-900'}
-                                                ${route.color === 'green' && 'text-green-900'}
-                                                ${route.color === 'purple' && 'text-purple-900'}
-                                                ${route.color === 'amber' && 'text-amber-900'}
-                                            `}>
-                        {route.label}
-                      </h3>
-                      <p className="text-sm text-gray-600 leading-relaxed">
-                        {route.description}
-                      </p>
-                    </div>
-
-                    {/* Lock Badge for Restricted Routes */}
-                    {isRestricted && (
-                      <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 px-3 py-1.5 rounded-lg">
-                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                        </svg>
-                        <span className="font-medium">Login Required</span>
-                      </div>
-                    )}
-
-                    {/* Arrow Indicator */}
-                    {!isRestricted && (
-                      <div className="flex items-center gap-2 text-sm text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <span>Explore</span>
-                        <svg className="w-4 h-4 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                      </div>
-                    )}
-                  </div>
-                </Link>
-              </div>
-            );
-          })}
+            {/* Polymarket Module */}
+            <div className="bg-white rounded-2xl p-8 border-2 border-gray-200 hover:border-gray-900 transition-all group">
+              <div className="text-5xl mb-6">🎲</div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-4">Prediction Markets</h3>
+              <p className="text-gray-600 mb-6 leading-relaxed">
+                Trade on real-world events and earn profits from your predictions.
+                Access diverse markets covering politics, sports, crypto, and more.
+                Make informed decisions with comprehensive market analytics.
+              </p>
+              <ul className="space-y-3 mb-8">
+                <li className="flex items-center gap-3 text-sm text-gray-700">
+                  <span className="text-lg">✓</span>
+                  <span>Diverse prediction markets</span>
+                </li>
+                <li className="flex items-center gap-3 text-sm text-gray-700">
+                  <span className="text-lg">✓</span>
+                  <span>Real-time odds tracking</span>
+                </li>
+                <li className="flex items-center gap-3 text-sm text-gray-700">
+                  <span className="text-lg">✓</span>
+                  <span>Position management</span>
+                </li>
+                <li className="flex items-center gap-3 text-sm text-gray-700">
+                  <span className="text-lg">✓</span>
+                  <span>Market analytics</span>
+                </li>
+              </ul>
+            </div>
+          </div>
         </div>
-      </main>
+      </div>
+
+      {/* How It Works */}
+      <div className="py-24">
+        <div className="max-w-5xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+              How It Works
+            </h2>
+            <p className="text-lg text-gray-600">
+              Get started in minutes
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-8">
+            <div className="text-center">
+              <div className="w-16 h-16 mx-auto mb-4 bg-gray-900 rounded-full flex items-center justify-center text-white text-xl font-bold">
+                1
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">Create Account</h3>
+              <p className="text-gray-600 text-sm">
+                Sign up with your email and verify your account
+              </p>
+            </div>
+
+            <div className="text-center">
+              <div className="w-16 h-16 mx-auto mb-4 bg-gray-900 rounded-full flex items-center justify-center text-white text-xl font-bold">
+                2
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">Fund Wallet</h3>
+              <p className="text-gray-600 text-sm">
+                Add funds to your unified wallet for trading
+              </p>
+            </div>
+
+            <div className="text-center">
+              <div className="w-16 h-16 mx-auto mb-4 bg-gray-900 rounded-full flex items-center justify-center text-white text-xl font-bold">
+                3
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">Start Trading</h3>
+              <p className="text-gray-600 text-sm">
+                Trade stocks and predictions with ease
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* CTA Section */}
+      <div className="py-24 bg-gray-900 text-white">
+        <div className="max-w-4xl mx-auto px-6 text-center">
+          <h2 className="text-3xl md:text-4xl font-bold mb-6">
+            Ready to Start Trading?
+          </h2>
+          <p className="text-lg text-gray-300 mb-8">
+            Join thousands of traders who trust our platform
+          </p>
+          <Link
+            href="/login"
+            className="inline-block px-8 py-4 bg-white text-gray-900 font-semibold rounded-lg hover:bg-gray-100 transition-all shadow-lg"
+          >
+            Get Started Now
+          </Link>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="py-12 border-t border-gray-200">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">🐱</span>
+              <span className="font-bold text-gray-900">Trading Platform</span>
+            </div>
+            <p className="text-sm text-gray-600">
+              © 2026 Trading Platform. All rights reserved.
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

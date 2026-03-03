@@ -18,6 +18,8 @@ interface Transaction {
     price: number;
     totalAmount: number;
     currency: string;
+    balanceAfter?: number;
+    description?: string;
     date: string;
 }
 
@@ -39,6 +41,9 @@ export default function WalletUI({
     const [withdrawing, setWithdrawing] = useState(false);
     const [withdrawSuccess, setWithdrawSuccess] = useState<{ amount: number; newBalance: number } | null>(null);
     const currencyMenuRef = useRef<HTMLDivElement>(null);
+
+    // Transaction filter state
+    const [transactionFilter, setTransactionFilter] = useState<'ALL' | 'WALLET' | 'STOCKS' | 'POLYMARKET'>('ALL');
 
     // Export report states
     const [showExportModal, setShowExportModal] = useState(false);
@@ -463,79 +468,210 @@ export default function WalletUI({
 
             {/* Transaction History */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <div className="w-1.5 h-5 rounded-full bg-gray-900" />
-                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Transaction History</h3>
+                <div className="px-6 py-4 border-b border-gray-100">
+                    <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-5 rounded-full bg-gray-900" />
+                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Transaction History</h3>
+                        </div>
+                        {transactions.length > 0 && (
+                            <button
+                                onClick={() => setShowExportModal(true)}
+                                className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors border border-gray-200"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                Export
+                            </button>
+                        )}
                     </div>
-                    {transactions.length > 0 && (
+
+                    {/* Transaction Filter Buttons */}
+                    <div className="flex flex-wrap gap-2">
                         <button
-                            onClick={() => setShowExportModal(true)}
-                            className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors border border-gray-200"
+                            onClick={() => setTransactionFilter('ALL')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${transactionFilter === 'ALL'
+                                    ? 'bg-gray-900 text-white'
+                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                }`}
                         >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            Export Report
+                            All
                         </button>
-                    )}
+                        <button
+                            onClick={() => setTransactionFilter('WALLET')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${transactionFilter === 'WALLET'
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                }`}
+                        >
+                            Wallet
+                        </button>
+                        <button
+                            onClick={() => setTransactionFilter('STOCKS')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${transactionFilter === 'STOCKS'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                }`}
+                        >
+                            Stocks
+                        </button>
+                        <button
+                            onClick={() => setTransactionFilter('POLYMARKET')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${transactionFilter === 'POLYMARKET'
+                                    ? 'bg-purple-600 text-white'
+                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                }`}
+                        >
+                            Polymarket
+                        </button>
+                    </div>
                 </div>
 
-                {transactions.length === 0 ? (
-                    <div className="px-6 py-12 text-center">
-                        <div className="w-12 h-12 rounded-2xl bg-gray-50 flex items-center justify-center mx-auto mb-3">
-                            <svg className="w-6 h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                            </svg>
-                        </div>
-                        <p className="text-sm text-gray-400 mb-1">No transactions yet</p>
-                        <p className="text-xs text-gray-300">Your buy and sell transactions will appear here</p>
-                    </div>
-                ) : (
-                    <div className="divide-y divide-gray-50">
-                        {transactions.map((tx) => {
-                            const isBuy = tx.type === 'BUY';
-                            // Convert transaction amount to current wallet currency
-                            const convertedAmount = convertAmount(tx.totalAmount, tx.currency, currency);
+                {(() => {
+                    const filteredTransactions = transactions.filter((tx) => {
+                        if (transactionFilter === 'ALL') return true;
+                        if (transactionFilter === 'WALLET') return tx.type === 'DEPOSIT' || tx.type === 'WITHDRAW';
+                        if (transactionFilter === 'STOCKS') return tx.type === 'BUY' || tx.type === 'SELL' || tx.type === 'STOCK_BUY' || tx.type === 'STOCK_SELL';
+                        if (transactionFilter === 'POLYMARKET') return tx.type === 'POLYMARKET_BUY' || tx.type === 'POLYMARKET_SELL';
+                        return true;
+                    });
 
-                            return (
-                                <div key={tx.id} className="px-6 py-4 flex items-center gap-4 hover:bg-gray-50/50 transition-colors">
-                                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${isBuy ? 'bg-emerald-50' : 'bg-red-50'}`}>
-                                        <svg className={`w-4 h-4 ${isBuy ? 'text-emerald-600' : 'text-red-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            {isBuy ? (
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m0-16l-4 4m4-4l4 4" />
-                                            ) : (
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 20V4m0 16l-4-4m4 4l4-4" />
-                                            )}
-                                        </svg>
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <p className="text-sm font-semibold text-gray-900">{tx.symbol}</p>
-                                            <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${isBuy ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                                                {tx.type}
-                                            </span>
-                                        </div>
-                                        <p className="text-xs text-gray-400">
-                                            {tx.quantity} shares @ ${tx.price.toFixed(2)}
-                                            {tx.currency !== currency && (
-                                                <span className="text-gray-300"> • Orig: {tx.currency}</span>
-                                            )}
-                                        </p>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className={`text-sm font-bold ${isBuy ? 'text-red-600' : 'text-emerald-600'}`}>
-                                            {isBuy ? '-' : '+'}{currency} {convertedAmount.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
-                                        </p>
-                                        <p className="text-xs text-gray-400">
-                                            {new Date(tx.date).toLocaleDateString('en-MY', { month: 'short', day: 'numeric' })}
-                                        </p>
-                                    </div>
+                    const emptyMessages = {
+                        ALL: { title: 'No transactions yet', subtitle: 'Your transactions will appear here' },
+                        WALLET: { title: 'No wallet transactions', subtitle: 'Deposits and withdrawals will appear here' },
+                        STOCKS: { title: 'No stock transactions', subtitle: 'Stock trades will appear here' },
+                        POLYMARKET: { title: 'No Polymarket transactions', subtitle: 'Polymarket trades will appear here' },
+                    };
+
+                    if (filteredTransactions.length === 0) {
+                        return (
+                            <div className="px-6 py-12 text-center">
+                                <div className="w-12 h-12 rounded-2xl bg-gray-50 flex items-center justify-center mx-auto mb-3">
+                                    <svg className="w-6 h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                                    </svg>
                                 </div>
-                            );
-                        })}
-                    </div>
-                )}
+                                <p className="text-sm text-gray-400 mb-1">{emptyMessages[transactionFilter].title}</p>
+                                <p className="text-xs text-gray-300">{emptyMessages[transactionFilter].subtitle}</p>
+                            </div>
+                        );
+                    }
+
+                    return (
+                        <div className="divide-y divide-gray-50">
+                            {filteredTransactions.map((tx) => {
+                                // Determine transaction category
+                                const isDeposit = tx.type === 'DEPOSIT';
+                                const isWithdraw = tx.type === 'WITHDRAW';
+                                const isStockBuy = tx.type === 'BUY' || tx.type === 'STOCK_BUY';
+                                const isStockSell = tx.type === 'SELL' || tx.type === 'STOCK_SELL';
+                                const isPolymarketBuy = tx.type === 'POLYMARKET_BUY';
+                                const isPolymarketSell = tx.type === 'POLYMARKET_SELL';
+
+                                // Determine icon color and background
+                                let bgColor = 'bg-gray-50';
+                                let textColor = 'text-gray-600';
+                                let badgeBg = 'bg-gray-50';
+                                let badgeText = 'text-gray-700';
+                                let amountColor = 'text-gray-600';
+                                let amountSign = '';
+
+                                if (isDeposit) {
+                                    bgColor = 'bg-emerald-50';
+                                    textColor = 'text-emerald-600';
+                                    badgeBg = 'bg-emerald-50';
+                                    badgeText = 'text-emerald-700';
+                                    amountColor = 'text-emerald-600';
+                                    amountSign = '+';
+                                } else if (isWithdraw) {
+                                    bgColor = 'bg-red-50';
+                                    textColor = 'text-red-600';
+                                    badgeBg = 'bg-red-50';
+                                    badgeText = 'text-red-700';
+                                    amountColor = 'text-red-600';
+                                    amountSign = '-';
+                                } else if (isStockBuy) {
+                                    bgColor = 'bg-blue-50';
+                                    textColor = 'text-blue-600';
+                                    badgeBg = 'bg-blue-50';
+                                    badgeText = 'text-blue-700';
+                                    amountColor = 'text-red-600';
+                                    amountSign = '-';
+                                } else if (isStockSell) {
+                                    bgColor = 'bg-green-50';
+                                    textColor = 'text-green-600';
+                                    badgeBg = 'bg-green-50';
+                                    badgeText = 'text-green-700';
+                                    amountColor = 'text-emerald-600';
+                                    amountSign = '+';
+                                } else if (isPolymarketBuy) {
+                                    bgColor = 'bg-purple-50';
+                                    textColor = 'text-purple-600';
+                                    badgeBg = 'bg-purple-50';
+                                    badgeText = 'text-purple-700';
+                                    amountColor = 'text-red-600';
+                                    amountSign = '-';
+                                } else if (isPolymarketSell) {
+                                    bgColor = 'bg-orange-50';
+                                    textColor = 'text-orange-600';
+                                    badgeBg = 'bg-orange-50';
+                                    badgeText = 'text-orange-700';
+                                    amountColor = 'text-emerald-600';
+                                    amountSign = '+';
+                                }
+
+                                // Convert transaction amount to current wallet currency
+                                const convertedAmount = convertAmount(tx.totalAmount, tx.currency, currency);
+
+                                return (
+                                    <div key={tx.id} className="px-6 py-3 flex items-center gap-3 hover:bg-gray-50/50 transition-colors">
+                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${bgColor}`}>
+                                            <svg className={`w-3.5 h-3.5 ${textColor}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                {isDeposit ? (
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m0-16l-4 4m4-4l4 4" />
+                                                ) : isWithdraw ? (
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 20V4m0 16l-4-4m4 4l4-4" />
+                                                ) : (isStockBuy || isStockSell) ? (
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                                                ) : (isPolymarketBuy || isPolymarketSell) ? (
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                ) : (
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                                                )}
+                                            </svg>
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-semibold text-gray-900">
+                                                {isDeposit ? 'Deposit' : isWithdraw ? 'Withdraw' : `${tx.symbol}`}
+                                            </p>
+                                            <p className="text-xs text-gray-400">
+                                                {isDeposit || isWithdraw ? (
+                                                    new Date(tx.date).toLocaleString('en-US', {
+                                                        month: 'short',
+                                                        day: 'numeric',
+                                                        hour: '2-digit',
+                                                        minute: '2-digit'
+                                                    })
+                                                ) : (
+                                                    `${tx.quantity} shares @ $${tx.price.toFixed(2)}`
+                                                )}
+                                            </p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className={`text-sm font-bold ${amountColor}`}>
+                                                {amountSign}{currency} {convertedAmount.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
+                                            </p>
+                                            <p className="text-[10px] text-gray-400">
+                                                {new Date(tx.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    );
+                })()}
             </div>
 
             {/* Withdrawal Success Message */}
@@ -708,8 +844,8 @@ export default function WalletUI({
                                     <button
                                         onClick={() => setExportFormat('csv')}
                                         className={`p-4 rounded-xl border-2 transition-all ${exportFormat === 'csv'
-                                                ? 'border-gray-900 bg-gray-50'
-                                                : 'border-gray-200 hover:border-gray-300'
+                                            ? 'border-gray-900 bg-gray-50'
+                                            : 'border-gray-200 hover:border-gray-300'
                                             }`}
                                     >
                                         <div className="flex items-center gap-3">
@@ -729,8 +865,8 @@ export default function WalletUI({
                                     <button
                                         onClick={() => setExportFormat('json')}
                                         className={`p-4 rounded-xl border-2 transition-all ${exportFormat === 'json'
-                                                ? 'border-gray-900 bg-gray-50'
-                                                : 'border-gray-200 hover:border-gray-300'
+                                            ? 'border-gray-900 bg-gray-50'
+                                            : 'border-gray-200 hover:border-gray-300'
                                             }`}
                                     >
                                         <div className="flex items-center gap-3">
@@ -759,8 +895,8 @@ export default function WalletUI({
                                             key={type}
                                             onClick={() => setExportType(type)}
                                             className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${exportType === type
-                                                    ? 'bg-gray-900 text-white'
-                                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
+                                                ? 'bg-gray-900 text-white'
+                                                : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
                                                 }`}
                                         >
                                             {type === 'ALL' ? 'All' : type}

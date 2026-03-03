@@ -1,4 +1,4 @@
-// H-Stocks Investment Platform - Market Overview
+// Stocks Module - Overview
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -17,7 +17,7 @@ async function getOverviewData() {
 
     let portfolio = { totalValue: 0, totalGainLoss: 0, holdingsCount: 0, cashBalance: 0 };
     let watchlistItems: WatchlistItem[] = [];
-    let currency = 'MYR'; // Default currency
+    let currency = 'MYR';
 
     if (user?.id) {
         try {
@@ -29,9 +29,9 @@ async function getOverviewData() {
 
             if (wallet) {
                 portfolio.cashBalance = Number(wallet.balance);
-                currency = wallet.currency; // Get currency from wallet
+                currency = wallet.currency;
             } else {
-                portfolio.cashBalance = 0; // No wallet = no cash
+                portfolio.cashBalance = 0;
             }
             if (holdings.length > 0) {
                 portfolio.holdingsCount = holdings.length;
@@ -43,7 +43,6 @@ async function getOverviewData() {
                 portfolio.totalValue = portfolio.cashBalance;
             }
 
-            // Fetch live prices and profiles for watchlist
             if (watchlist.length > 0) {
                 const stocksData = await Promise.all(
                     watchlist.map(async (w: { symbol: string }) => {
@@ -63,7 +62,7 @@ async function getOverviewData() {
                     high: stocksData[i]?.quote?.h ?? null,
                     low: stocksData[i]?.quote?.l ?? null,
                     previousClose: stocksData[i]?.quote?.pc ?? null,
-                    volume: null, // Finnhub quote doesn't include volume for current day
+                    volume: null,
                     marketCap: stocksData[i]?.profile?.marketCapitalization ?? null,
                     companyName: stocksData[i]?.profile?.name ?? null,
                 }));
@@ -78,7 +77,6 @@ async function getOverviewData() {
 
 // ==================== Page ====================
 export default async function HStocksPage() {
-    // Check if user is logged in
     const cookieStore = await cookies();
     const isLoggedIn = cookieStore.get("auth")?.value === "true";
 
@@ -94,28 +92,13 @@ export default async function HStocksPage() {
     const isPositive = Number(gainPercent) >= 0;
 
     return (
-        <div className="space-y-8">
-            {/* Hero Banner */}
-            <div className="relative overflow-hidden rounded-2xl bg-gray-900 p-8 md:p-10">
-                {/* Decorative elements */}
-                <div className="absolute top-0 right-0 w-80 h-80 bg-white/3 rounded-full -translate-y-1/2 translate-x-1/3" />
-                <div className="absolute bottom-0 left-1/3 w-60 h-60 bg-white/2 rounded-full translate-y-1/2" />
-                <div className="absolute top-6 right-8 flex gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-xs text-emerald-400 font-medium">Live</span>
-                </div>
-
-                <div className="relative">
-                    <p className="text-gray-400 text-sm font-medium mb-1">
-                        Welcome back, <span className="text-white">{user?.name || 'Investor'}</span>
-                    </p>
-                    <h1 className="text-2xl md:text-3xl font-bold text-white mb-1 tracking-tight">
-                        Investment Overview
-                    </h1>
-                    <p className="text-gray-500 text-sm">
-                        {new Date().toLocaleDateString('en-MY', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-                    </p>
-                </div>
+        <div className="space-y-6">
+            {/* Header */}
+            <div>
+                <h1 className="text-3xl font-bold text-gray-900">Stock Market</h1>
+                <p className="text-gray-600 mt-1">
+                    Trade and manage your stock portfolio
+                </p>
             </div>
 
             {/* Stats Grid */}
