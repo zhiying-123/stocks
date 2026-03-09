@@ -1,9 +1,9 @@
-// API Route: Buy Stock
+// API Route: Buy Polymarket Position
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import prisma from "@/lib/prisma";
 
-// Exchange rates (base: USD - stock prices are in USD)
+// Exchange rates (base: USD - Polymarket prices are in USD)
 const EXCHANGE_RATES_TO_USD = {
     USD: 1,
     MYR: 4.50,  // 1 USD = 4.50 MYR
@@ -16,19 +16,35 @@ export async function POST(request: NextRequest) {
         const userCookie = cookieStore.get("user")?.value;
         const user = userCookie ? JSON.parse(userCookie) : null;
 
+        console.log("[BUY POLYMARKET] User cookie:", user ? `id=${user.id}, email=${user.email}` : "NO USER COOKIE");
+
         if (!user?.id) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+            return NextResponse.json({ error: "Unauthorized - please log in again" }, { status: 401 });
         }
 
-        const { symbol, quantity, pricePerShare } = await request.json();
+        const body = await request.json();
+        const { marketId, outcome, quantity, pricePerShare } = body;
+
+        console.log("[BUY POLYMARKET] Request body:", JSON.stringify({ marketId, outcome, quantity, pricePerShare }));
 
         // Validate input
-        if (!symbol || !quantity || !pricePerShare) {
-            return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+        if (!marketId || !outcome || !quantity || pricePerShare == null) {
+            return NextResponse.json({ error: `Missing required fields: marketId=${!!marketId}, outcome=${!!outcome}, quantity=${!!quantity}, pricePerShare=${pricePerShare}` }, { status: 400 });
         }
 
         if (quantity <= 0 || pricePerShare <= 0) {
             return NextResponse.json({ error: "Invalid quantity or price" }, { status: 400 });
+        }
+
+        if (outcome !== "YES" && outcome !== "NO") {
+            return NextResponse.json({ error: "Invalid outcome. Must be YES or NO" }, { status: 400 });
+        }
+
+        // Debug: Check if prisma is defined
+        console.log("[BUY POLYMARKET] Prisma client:", typeof prisma, prisma ? "OK" : "UNDEFINED");
+
+        if (!prisma) {
+            return NextResponse.json({ error: "Database connection error" }, { status: 500 });
         }
 
         // Get user wallet
@@ -37,20 +53,23 @@ export async function POST(request: NextRequest) {
         });
 
         if (!wallet) {
-            return NextResponse.json({ error: "Wallet not found. Please activate your wallet first." }, { status: 404 });
+            return NextResponse.json({ error: "Wallet not found. Please activate your wallet first at /wallet." }, { status: 404 });
         }
 
         const currency = wallet.currency;
         const currentBalance = Number(wallet.balance);
 
-        // Calculate total cost in USD (stock prices are in USD)
+        // Calculate total cost in USD
         const totalCostUSD = pricePerShare * quantity;
 
         // Convert to user's wallet currency
         const exchangeRate = EXCHANGE_RATES_TO_USD[currency as keyof typeof EXCHANGE_RATES_TO_USD];
+        if (!exchangeRate) {
+            return NextResponse.json({ error: `Unsupported currency: ${currency}` }, { status: 400 });
+        }
         const totalCostInWalletCurrency = totalCostUSD * exchangeRate;
 
-        console.log(`[BUY STOCK] ${symbol}: ${quantity} shares @ $${pricePerShare} USD = $${totalCostUSD} USD = ${totalCostInWalletCurrency.toFixed(2)} ${currency}`);
+        console.log(`[BUY POLYMARKET] User ${user.id}: ${marketId} (${outcome}): ${quantity} shares @ $${pricePerShare} USD = $${totalCostUSD} USD = ${totalCostInWalletCurrency.toFixed(2)} ${currency}, Balance: ${currentBalance.toFixed(2)} ${currency}`);
 
         // Check if user has enough balance
         if (currentBalance < totalCostInWalletCurrency) {
@@ -71,11 +90,12 @@ export async function POST(request: NextRequest) {
             });
 
             // 2. Update or create holding
-            const existingHolding = await tx.stockHolding.findUnique({
+            const existingHolding = await tx.polymarketHolding.findUnique({
                 where: {
-                    u_id_symbol: {
+                    u_id_market_id_outcome: {
                         u_id: user.id,
-                        symbol: symbol,
+                        market_id: marketId,
+                        outcome: outcome,
                     },
                 },
             });
@@ -87,11 +107,12 @@ export async function POST(request: NextRequest) {
                 const totalCost = (existingHolding.quantity * existingHolding.avg_price) + totalCostUSD;
                 const newAvgPrice = totalCost / totalShares;
 
-                updatedHolding = await tx.stockHolding.update({
+                updatedHolding = await tx.polymarketHolding.update({
                     where: {
-                        u_id_symbol: {
+                        u_id_market_id_outcome: {
                             u_id: user.id,
-                            symbol: symbol,
+                            market_id: marketId,
+                            outcome: outcome,
                         },
                     },
                     data: {
@@ -102,68 +123,65 @@ export async function POST(request: NextRequest) {
                 });
             } else {
                 // Create new holding
-                updatedHolding = await tx.stockHolding.create({
+                updatedHolding = await tx.polymarketHolding.create({
                     data: {
                         u_id: user.id,
-                        symbol: symbol,
+                        market_id: marketId,
+                        outcome: outcome,
                         quantity: quantity,
                         avg_price: pricePerShare,
                     },
                 });
             }
 
-            // 3. Create transaction record
-            const transaction = await tx.stockTransaction.create({
+            // 3. Record Polymarket transaction
+            await tx.polymarketTransaction.create({
                 data: {
                     u_id: user.id,
-                    symbol: symbol,
-                    transaction_type: 'BUY',
+                    market_id: marketId,
+                    outcome: outcome,
+                    transaction_type: "BUY",
                     quantity: quantity,
                     price: pricePerShare,
-                    total_amount: totalCostInWalletCurrency,
+                    total_amount: totalCostUSD,
                     currency: currency,
                 },
             });
 
-            // 4. Create wallet transaction record for tracking money flow
+            // 4. Record wallet transaction for tracking money flow
             await tx.walletTransaction.create({
                 data: {
                     u_id: user.id,
-                    transaction_type: 'STOCK_BUY',
+                    transaction_type: "POLYMARKET_BUY",
                     amount: totalCostInWalletCurrency,
                     currency: currency,
-                    symbol: symbol,
-                    quantity: quantity,
+                    symbol: marketId,
+                    quantity: Math.round(quantity),
                     price: pricePerShare,
-                    description: `Bought ${quantity} shares of ${symbol}`,
-                    balance_after: Number(updatedWallet.balance),
+                    description: `Bought ${quantity} ${outcome} shares`,
+                    balance_after: updatedWallet.balance,
                 },
             });
 
-            return { updatedWallet, updatedHolding, transaction };
+            return {
+                holding: updatedHolding,
+                wallet: updatedWallet,
+            };
         });
-
-        console.log(`[BUY STOCK SUCCESS] User ${user.id} bought ${quantity} ${symbol} @ $${pricePerShare}`);
 
         return NextResponse.json({
             success: true,
-            message: `Successfully bought ${quantity} shares of ${symbol}`,
-            data: {
-                symbol: symbol,
-                quantity: quantity,
-                pricePerShare: pricePerShare,
-                totalCostUSD: totalCostUSD,
-                totalCostInCurrency: totalCostInWalletCurrency,
-                currency: currency,
-                newBalance: Number(result.updatedWallet.balance),
-                holding: {
-                    totalShares: result.updatedHolding.quantity,
-                    avgPrice: result.updatedHolding.avg_price,
-                },
-            },
+            message: `Successfully bought ${quantity} ${outcome} shares`,
+            holding: result.holding,
+            newBalance: result.wallet.balance,
         });
-    } catch (error) {
-        console.error("[BUY STOCK ERROR]", error);
-        return NextResponse.json({ error: "Failed to process purchase" }, { status: 500 });
+
+    } catch (error: any) {
+        console.error("[BUY POLYMARKET ERROR]", error);
+        const message = error?.message || "Failed to buy Polymarket position";
+        return NextResponse.json(
+            { error: message },
+            { status: 500 }
+        );
     }
 }

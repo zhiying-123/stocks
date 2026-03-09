@@ -28,9 +28,11 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
         }
 
-        // Always use Stripe Checkout for all payments
-        // Stripe supports multiple payment methods including cards
-        const paymentMethodTypes: Stripe.Checkout.SessionCreateParams.PaymentMethodType[] = ["card"];
+        // Multiple payment methods supported by Stripe
+        // Note: Some payment methods require additional Stripe account setup
+        const paymentMethodTypes: Stripe.Checkout.SessionCreateParams.PaymentMethodType[] = [
+            "card",      // Credit/Debit cards (always available)
+        ];
 
         // Create Stripe Checkout Session
         const stripe = getStripe();
@@ -61,10 +63,13 @@ export async function POST(req: NextRequest) {
         });
 
         return NextResponse.json({ sessionId: session.id, url: session.url });
-    } catch (error) {
+    } catch (error: any) {
         console.error("[STRIPE CHECKOUT ERROR]", error);
         return NextResponse.json(
-            { error: "Failed to create checkout session" },
+            {
+                error: "Failed to create checkout session",
+                details: error?.message || "Unknown error"
+            },
             { status: 500 }
         );
     }

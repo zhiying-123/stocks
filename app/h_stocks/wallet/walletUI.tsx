@@ -11,7 +11,7 @@ interface WalletData {
 }
 
 interface Transaction {
-    id: number;
+    id: number | string;
     symbol: string;
     type: string;
     quantity: number;
@@ -466,13 +466,12 @@ export default function WalletUI({
                 </div>
             </div>
 
-            {/* Transaction History */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
                 <div className="px-6 py-4 border-b border-gray-100">
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2">
                             <div className="w-1.5 h-5 rounded-full bg-gray-900" />
-                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Transaction History</h3>
+                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Money Flow</h3>
                         </div>
                         {transactions.length > 0 && (
                             <button
@@ -492,55 +491,56 @@ export default function WalletUI({
                         <button
                             onClick={() => setTransactionFilter('ALL')}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${transactionFilter === 'ALL'
-                                    ? 'bg-gray-900 text-white'
-                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                    ? 'bg-gray-100 text-gray-900 border border-gray-300'
+                                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
                                 }`}
                         >
-                            All
+                            All Transactions
                         </button>
                         <button
                             onClick={() => setTransactionFilter('WALLET')}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${transactionFilter === 'WALLET'
-                                    ? 'bg-emerald-600 text-white'
-                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
                                 }`}
                         >
-                            Wallet
+                            💰 Wallet
                         </button>
                         <button
                             onClick={() => setTransactionFilter('STOCKS')}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${transactionFilter === 'STOCKS'
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
                                 }`}
                         >
-                            Stocks
+                            📈 Stocks
                         </button>
                         <button
                             onClick={() => setTransactionFilter('POLYMARKET')}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${transactionFilter === 'POLYMARKET'
-                                    ? 'bg-purple-600 text-white'
-                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                    ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
                                 }`}
                         >
-                            Polymarket
+                            🎲 Polymarket
                         </button>
                     </div>
                 </div>
 
                 {(() => {
+                    // Filter transactions by category
                     const filteredTransactions = transactions.filter((tx) => {
                         if (transactionFilter === 'ALL') return true;
                         if (transactionFilter === 'WALLET') return tx.type === 'DEPOSIT' || tx.type === 'WITHDRAW';
-                        if (transactionFilter === 'STOCKS') return tx.type === 'BUY' || tx.type === 'SELL' || tx.type === 'STOCK_BUY' || tx.type === 'STOCK_SELL';
+                        if (transactionFilter === 'STOCKS') return tx.type === 'STOCK_BUY' || tx.type === 'STOCK_SELL';
                         if (transactionFilter === 'POLYMARKET') return tx.type === 'POLYMARKET_BUY' || tx.type === 'POLYMARKET_SELL';
                         return true;
                     });
 
                     const emptyMessages = {
-                        ALL: { title: 'No transactions yet', subtitle: 'Your transactions will appear here' },
+                        ALL: { title: 'No transactions yet', subtitle: 'Your money flow will appear here' },
                         WALLET: { title: 'No wallet transactions', subtitle: 'Deposits and withdrawals will appear here' },
-                        STOCKS: { title: 'No stock transactions', subtitle: 'Stock trades will appear here' },
+                        STOCKS: { title: 'No stock transactions', subtitle: 'Stock purchases and sales will appear here' },
                         POLYMARKET: { title: 'No Polymarket transactions', subtitle: 'Polymarket trades will appear here' },
                     };
 
@@ -564,65 +564,60 @@ export default function WalletUI({
                                 // Determine transaction category
                                 const isDeposit = tx.type === 'DEPOSIT';
                                 const isWithdraw = tx.type === 'WITHDRAW';
-                                const isStockBuy = tx.type === 'BUY' || tx.type === 'STOCK_BUY';
-                                const isStockSell = tx.type === 'SELL' || tx.type === 'STOCK_SELL';
+                                const isStockBuy = tx.type === 'STOCK_BUY';
+                                const isStockSell = tx.type === 'STOCK_SELL';
                                 const isPolymarketBuy = tx.type === 'POLYMARKET_BUY';
                                 const isPolymarketSell = tx.type === 'POLYMARKET_SELL';
 
-                                // Determine icon color and background
-                                let bgColor = 'bg-gray-50';
-                                let textColor = 'text-gray-600';
-                                let badgeBg = 'bg-gray-50';
-                                let badgeText = 'text-gray-700';
-                                let amountColor = 'text-gray-600';
-                                let amountSign = '';
+                                // Determine display properties
+                                let bgColor, textColor, amountColor, amountSign, label;
 
                                 if (isDeposit) {
                                     bgColor = 'bg-emerald-50';
                                     textColor = 'text-emerald-600';
-                                    badgeBg = 'bg-emerald-50';
-                                    badgeText = 'text-emerald-700';
                                     amountColor = 'text-emerald-600';
                                     amountSign = '+';
+                                    label = 'Deposit';
                                 } else if (isWithdraw) {
                                     bgColor = 'bg-red-50';
                                     textColor = 'text-red-600';
-                                    badgeBg = 'bg-red-50';
-                                    badgeText = 'text-red-700';
                                     amountColor = 'text-red-600';
                                     amountSign = '-';
+                                    label = 'Withdraw';
                                 } else if (isStockBuy) {
                                     bgColor = 'bg-blue-50';
                                     textColor = 'text-blue-600';
-                                    badgeBg = 'bg-blue-50';
-                                    badgeText = 'text-blue-700';
                                     amountColor = 'text-red-600';
                                     amountSign = '-';
+                                    label = tx.symbol;
                                 } else if (isStockSell) {
-                                    bgColor = 'bg-green-50';
-                                    textColor = 'text-green-600';
-                                    badgeBg = 'bg-green-50';
-                                    badgeText = 'text-green-700';
+                                    bgColor = 'bg-blue-50';
+                                    textColor = 'text-blue-600';
                                     amountColor = 'text-emerald-600';
                                     amountSign = '+';
+                                    label = tx.symbol;
                                 } else if (isPolymarketBuy) {
                                     bgColor = 'bg-purple-50';
                                     textColor = 'text-purple-600';
-                                    badgeBg = 'bg-purple-50';
-                                    badgeText = 'text-purple-700';
                                     amountColor = 'text-red-600';
                                     amountSign = '-';
+                                    label = 'Polymarket';
                                 } else if (isPolymarketSell) {
-                                    bgColor = 'bg-orange-50';
-                                    textColor = 'text-orange-600';
-                                    badgeBg = 'bg-orange-50';
-                                    badgeText = 'text-orange-700';
+                                    bgColor = 'bg-purple-50';
+                                    textColor = 'text-purple-600';
                                     amountColor = 'text-emerald-600';
                                     amountSign = '+';
+                                    label = 'Polymarket';
+                                } else {
+                                    bgColor = 'bg-gray-50';
+                                    textColor = 'text-gray-600';
+                                    amountColor = 'text-gray-600';
+                                    amountSign = '';
+                                    label = 'Transaction';
                                 }
 
                                 // Convert transaction amount to current wallet currency
-                                const convertedAmount = convertAmount(tx.totalAmount, tx.currency, currency);
+                                const convertedAmount = convertAmount(Math.abs(tx.totalAmount), tx.currency, currency);
 
                                 return (
                                     <div key={tx.id} className="px-6 py-3 flex items-center gap-3 hover:bg-gray-50/50 transition-colors">
@@ -634,28 +629,20 @@ export default function WalletUI({
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 20V4m0 16l-4-4m4 4l4-4" />
                                                 ) : (isStockBuy || isStockSell) ? (
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                                                ) : (isPolymarketBuy || isPolymarketSell) ? (
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                 ) : (
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                 )}
                                             </svg>
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-semibold text-gray-900">
-                                                {isDeposit ? 'Deposit' : isWithdraw ? 'Withdraw' : `${tx.symbol}`}
-                                            </p>
+                                            <p className="text-sm font-semibold text-gray-900">{label}</p>
                                             <p className="text-xs text-gray-400">
-                                                {isDeposit || isWithdraw ? (
-                                                    new Date(tx.date).toLocaleString('en-US', {
-                                                        month: 'short',
-                                                        day: 'numeric',
-                                                        hour: '2-digit',
-                                                        minute: '2-digit'
-                                                    })
-                                                ) : (
-                                                    `${tx.quantity} shares @ $${tx.price.toFixed(2)}`
-                                                )}
+                                                {tx.description || new Date(tx.date).toLocaleString('en-US', {
+                                                    month: 'short',
+                                                    day: 'numeric',
+                                                    hour: '2-digit',
+                                                    minute: '2-digit'
+                                                })}
                                             </p>
                                         </div>
                                         <div className="text-right">

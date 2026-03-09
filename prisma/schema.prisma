@@ -93,3 +93,36 @@ model WalletTransaction {
   @@index([transaction_type])
   @@index([transaction_date])
 }
+
+model PolymarketHolding {
+  holding_id Int      @id @default(autoincrement())
+  u_id       Int
+  market_id  String // Polymarket market ID
+  outcome    String // "YES" or "NO"
+  quantity   Float // Number of shares
+  avg_price  Float // Average price per share in USD
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([u_id, market_id, outcome])
+  @@index([u_id])
+  @@index([market_id])
+}
+
+model PolymarketTransaction {
+  transaction_id   Int      @id @default(autoincrement())
+  u_id             Int
+  market_id        String
+  outcome          String // "YES" or "NO"
+  transaction_type String // "BUY" or "SELL"
+  quantity         Float
+  price            Float // Price per share in USD
+  total_amount     Float // Total in USD
+  currency         String   @default("MYR") // Wallet currency used
+  transaction_date DateTime @default(now())
+  created_at       DateTime @default(now())
+
+  @@index([u_id])
+  @@index([market_id])
+  @@index([transaction_date])
+}

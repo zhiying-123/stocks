@@ -40,7 +40,8 @@ git push -u origin main
 
 ```env
 # Database (PostgreSQL)
-DATABASE_URL="postgresql://user:password@host:5432/database"
+# Note: Add ?sslmode=verify-full for secure SSL connections
+DATABASE_URL="postgresql://user:password@host:5432/database?sslmode=verify-full"
 
 # Email Configuration
 EMAIL_HOST=smtp.gmail.com

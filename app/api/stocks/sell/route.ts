@@ -127,6 +127,21 @@ export async function POST(request: NextRequest) {
                 },
             });
 
+            // 4. Create wallet transaction record for tracking money flow
+            await tx.walletTransaction.create({
+                data: {
+                    u_id: user.id,
+                    transaction_type: 'STOCK_SELL',
+                    amount: totalRevenueInWalletCurrency,
+                    currency: currency,
+                    symbol: symbol,
+                    quantity: quantity,
+                    price: pricePerShare,
+                    description: `Sold ${quantity} shares of ${symbol}`,
+                    balance_after: Number(updatedWallet.balance),
+                },
+            });
+
             return { updatedWallet, updatedHolding, transaction };
         });
 

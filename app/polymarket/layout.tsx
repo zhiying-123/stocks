@@ -20,7 +20,7 @@ export default async function PolymarketLayout({
     }
 
     return (
-        <div className="max-w-7xl mx-auto">
+        <div className="min-h-screen bg-white">
             {children}
         </div>
     );

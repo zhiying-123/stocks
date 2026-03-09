@@ -95,10 +95,14 @@ export default function TopUpUI({
                 // Redirect to Stripe Checkout
                 window.location.href = data.url;
             } else {
-                setError(data.error || 'Failed to create checkout session');
+                const errorMsg = data.details
+                    ? `${data.error}: ${data.details}`
+                    : (data.error || 'Failed to create checkout session');
+                setError(errorMsg);
                 setLoading(false);
             }
-        } catch {
+        } catch (err) {
+            console.error("[TOP-UP UI ERROR]", err);
             setError('Network error, please try again');
             setLoading(false);
         }

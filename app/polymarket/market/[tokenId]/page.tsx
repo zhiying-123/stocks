@@ -1,8 +1,8 @@
-// Polymarket Main Page
+// Polymarket Market Detail Page - Server Component
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
-import PolymarketUI from "./polymarketUI";
+import MarketDetailUI from "./MarketDetailUI";
 
 const POLYMARKET_API = "https://gamma-api.polymarket.com";
 
@@ -14,9 +14,9 @@ async function getAuthState() {
     return { isLoggedIn, user };
 }
 
-async function fetchMarkets() {
+async function fetchMarketInfo(tokenId: string) {
     try {
-        const response = await fetch(`${POLYMARKET_API}/events?limit=100&offset=0&closed=false`, {
+        const response = await fetch(`${POLYMARKET_API}/events?limit=200&offset=0&closed=false`, {
             cache: "no-store",
             headers: {
                 'Accept': 'application/json',
@@ -25,26 +25,27 @@ async function fetchMarkets() {
 
         if (!response.ok) {
             console.error("Failed to fetch markets:", response.status);
-            return [];
+            return null;
         }
 
         const data = await response.json();
-
-        // Flatten all markets from all events and find ones with active prices
-        const allMarkets: any[] = [];
 
         for (const event of data) {
             if (!event.markets || !Array.isArray(event.markets)) continue;
 
             for (const market of event.markets) {
-                let prices = market.outcomePrices;
-                if (!prices) continue;
+                let clobIds = market.clobTokenIds;
+                if (typeof clobIds === 'string') {
+                    try { clobIds = JSON.parse(clobIds); } catch { clobIds = []; }
+                }
+                const token = clobIds?.[0]?.trim() || market.conditionId || '';
+                if (!token || token !== tokenId) continue;
 
-                // Parse JSON string if needed
+                let prices = market.outcomePrices;
                 if (typeof prices === 'string') {
                     try {
                         prices = JSON.parse(prices);
-                    } catch (e) {
+                    } catch {
                         continue;
                     }
                 }
@@ -54,48 +55,30 @@ async function fetchMarkets() {
                 const yesPrice = parseFloat(prices[0]);
                 const noPrice = parseFloat(prices[1]);
 
-                // Skip extreme prices (already resolved markets)
                 if (isNaN(yesPrice) || isNaN(noPrice)) continue;
-                if (yesPrice <= 0.02 || yesPrice >= 0.98) continue;
 
-                // Extract category/tags
                 const tags = event.tags || [];
                 const category = tags.length > 0 && tags[0].label ? tags[0].label : "Other";
-                const tagLabels = tags.map((tag: any) => tag.label || tag).filter(Boolean);
 
-                // Parse clobTokenIds (may be JSON string)
-                let clobIds = market.clobTokenIds;
-                if (typeof clobIds === 'string') {
-                    try { clobIds = JSON.parse(clobIds); } catch { clobIds = []; }
-                }
-
-                allMarkets.push({
-                    id: market.id || market.conditionId || `market-${Math.random()}`,
+                return {
+                    id: market.id || market.conditionId || tokenId,
                     question: market.question || event.title || "Untitled Market",
                     description: market.description || event.description || "",
-                    end_date_iso: market.endDate || event.end_date_iso || "",
                     image: event.image || event.icon || "",
-                    outcomes: [
-                        { name: "YES", price: yesPrice },
-                        { name: "NO", price: noPrice },
-                    ],
+                    category: category,
+                    yesPrice: yesPrice,
+                    noPrice: noPrice,
                     volume: event.volume ? parseFloat(event.volume) / event.markets.length : 0,
                     liquidity: market.liquidity ? parseFloat(market.liquidity) : 0,
-                    category: category,
-                    tags: tagLabels,
-                    conditionId: clobIds?.[0]?.trim() || market.conditionId || "",
-                });
+                    conditionId: tokenId,
+                };
             }
         }
 
-        // Sort by volume and return
-        allMarkets.sort((a, b) => (b.volume || 0) - (a.volume || 0));
-
-        console.log(`✅ Found ${allMarkets.length} active markets from Polymarket`);
-        return allMarkets;
+        return null;
     } catch (error) {
-        console.error("Error fetching markets:", error);
-        return [];
+        console.error("Error fetching market info:", error);
+        return null;
     }
 }
 
@@ -111,16 +94,23 @@ async function getUserWallet(userId: number) {
     }
 }
 
-export default async function PolymarketPage() {
+export default async function MarketDetailPage({ params }: { params: Promise<{ tokenId: string }> }) {
     const { isLoggedIn, user } = await getAuthState();
 
     if (!isLoggedIn) {
         redirect("/login");
     }
 
-    const markets = await fetchMarkets();
+    const resolvedParams = await params;
+    const tokenId = decodeURIComponent(resolvedParams.tokenId);
+    const marketInfo = await fetchMarketInfo(tokenId);
+
+    if (!marketInfo) {
+        redirect("/polymarket");
+    }
+
     const wallet = user?.id ? await getUserWallet(user.id) : null;
     const currency = wallet?.currency || "MYR";
 
-    return <PolymarketUI markets={markets} currency={currency} />;
+    return <MarketDetailUI marketInfo={marketInfo} tokenId={tokenId} currency={currency} />;
 }
