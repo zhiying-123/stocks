@@ -116,69 +116,94 @@ export default function PolymarketUI({ markets, currency }: PolymarketUIProps) {
                     <div className="col-span-12 lg:col-span-7 flex flex-col">
                         {currentFeatured && (
                             <>
-                                <div className="bg-white rounded-2xl border border-gray-200 p-6 overflow-hidden shadow-sm hover:shadow-md transition-shadow flex-1">
-
-                                    <div className="flex items-start gap-4">
+                                <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow flex-1">
+                                    <div className="flex items-start gap-5">
                                         {/* Image */}
                                         {currentFeatured.image && (
                                             <img
                                                 src={currentFeatured.image}
                                                 alt=""
-                                                className="w-16 h-16 rounded-lg object-cover border border-gray-200"
+                                                className="w-20 h-20 rounded-xl object-cover border border-gray-200"
                                                 onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
                                             />
                                         )}
                                         <div className="flex-1">
+                                            {/* Tags */}
                                             <div className="flex items-center gap-2 mb-2">
-                                                <span className="px-2.5 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full border border-blue-200">
+                                                <span className="px-2.5 py-0.5 bg-gray-900 text-white text-xs font-semibold rounded-full">
+                                                    Featured
+                                                </span>
+                                                <span className="px-2.5 py-0.5 bg-gray-100 text-gray-600 text-xs font-medium rounded-full">
                                                     {currentFeatured.category || 'Market'}
                                                 </span>
-                                                <span className="px-2.5 py-0.5 bg-purple-100 text-purple-700 text-xs font-medium rounded-full border border-purple-200">
-                                                    {formatVolume(currentFeatured.volume)} volume
-                                                </span>
                                             </div>
-                                            <h2 className="text-xl font-bold text-gray-900 mb-4 leading-tight">
+
+                                            {/* Question */}
+                                            <h2 className="text-xl font-bold text-gray-900 mb-2 leading-tight">
                                                 {currentFeatured.question}
                                             </h2>
 
+                                            {/* Description */}
+                                            {currentFeatured.description && (
+                                                <p className="text-sm text-gray-500 mb-3 line-clamp-2">
+                                                    {currentFeatured.description}
+                                                </p>
+                                            )}
+
+                                            {/* Market Stats */}
+                                            <div className="grid grid-cols-3 gap-4 mb-4 py-3 border-y border-gray-100">
+                                                <div>
+                                                    <div className="text-xs text-gray-400 mb-0.5">Volume</div>
+                                                    <div className="text-sm font-bold text-gray-900">{formatVolume(currentFeatured.volume)}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs text-gray-400 mb-0.5">Liquidity</div>
+                                                    <div className="text-sm font-bold text-gray-900">{formatVolume(currentFeatured.liquidity)}</div>
+                                                </div>
+                                                <div>
+                                                    <div className="text-xs text-gray-400 mb-0.5">End Date</div>
+                                                    <div className="text-sm font-bold text-gray-900">
+                                                        {currentFeatured.end_date_iso
+                                                            ? new Date(currentFeatured.end_date_iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                                            : '-'
+                                                        }
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                             {/* Outcomes */}
                                             <div className="space-y-3 mb-4">
-                                                {currentFeatured.outcomes?.map((outcome, idx) => {
+                                                {currentFeatured.outcomes?.map((outcome) => {
                                                     const pct = (outcome.price * 100).toFixed(0);
-                                                    const pctNum = parseInt(pct);
-                                                    const barColor = outcome.name === 'YES' ? 'bg-cyan-200' : 'bg-red-200';
-                                                    const pctColor = getProbabilityColor(pctNum);
-                                                    const textColor = outcome.name === 'YES' ? 'text-cyan-600' : 'text-red-600';
+                                                    const isYes = outcome.name === 'YES';
                                                     return (
-                                                        <div key={outcome.name}>
-                                                            <div className="flex justify-between items-center mb-1.5">
-                                                                <span className={`text-sm font-medium ${textColor}`}>{outcome.name}</span>
-                                                                <span className={`text-lg font-bold ${pctColor}`}>{pct}%</span>
-                                                            </div>
-                                                            <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                                                        <div key={outcome.name} className="flex items-center gap-3">
+                                                            <div className="w-12 text-sm font-semibold text-gray-600">{outcome.name}</div>
+                                                            <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
                                                                 <div
-                                                                    className={`h-full ${barColor} rounded-full transition-all`}
+                                                                    className={`h-full rounded-full transition-all duration-500 ${isYes ? 'bg-gray-700' : 'bg-gray-400'}`}
                                                                     style={{ width: `${pct}%` }}
                                                                 />
                                                             </div>
+                                                            <div className="w-14 text-right text-lg font-bold text-gray-900">{pct}%</div>
                                                         </div>
                                                     );
                                                 })}
                                             </div>
 
                                             {/* Trade Buttons */}
-                                            <div className="flex gap-2">
+                                            <div className="flex gap-3">
                                                 <button
                                                     onClick={() => goToMarket(currentFeatured, 'YES')}
-                                                    className="flex-1 px-4 py-2.5 bg-green-100 hover:bg-green-500 text-green-700 hover:text-white font-semibold text-sm rounded-lg transition-all border border-green-200 hover:border-green-500"
+                                                    className="flex-1 px-4 py-3 bg-green-50 hover:bg-green-100 text-green-700 font-semibold text-sm rounded-lg transition-all border border-green-200"
                                                 >
-                                                    Yes {((currentFeatured.outcomes?.[0]?.price || 0.5) * 100).toFixed(0)}¢
+                                                    Buy Yes · {((currentFeatured.outcomes?.[0]?.price || 0.5) * 100).toFixed(0)}¢
                                                 </button>
                                                 <button
                                                     onClick={() => goToMarket(currentFeatured, 'NO')}
-                                                    className="flex-1 px-4 py-2.5 bg-red-100 hover:bg-red-500 text-red-700 hover:text-white font-semibold text-sm rounded-lg transition-all border border-red-200 hover:border-red-500"
+                                                    className="flex-1 px-4 py-3 bg-red-50 hover:bg-red-100 text-red-700 font-semibold text-sm rounded-lg transition-all border border-red-200"
                                                 >
-                                                    No {((currentFeatured.outcomes?.[1]?.price || 0.5) * 100).toFixed(0)}¢
+                                                    Buy No · {((currentFeatured.outcomes?.[1]?.price || 0.5) * 100).toFixed(0)}¢
                                                 </button>
                                             </div>
                                         </div>

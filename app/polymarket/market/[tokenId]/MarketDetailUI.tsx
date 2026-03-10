@@ -47,6 +47,7 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency }: Market
     const [processing, setProcessing] = useState(false);
     const [tradeError, setTradeError] = useState('');
     const [tradeSuccess, setTradeSuccess] = useState('');
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
 
     // Fetch price history
     useEffect(() => {
@@ -408,8 +409,8 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency }: Market
                                                 key={range}
                                                 onClick={() => setTimeRange(range)}
                                                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${selected
-                                                        ? 'bg-gray-900 text-white'
-                                                        : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
+                                                    ? 'bg-gray-900 text-white'
+                                                    : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
                                                     }`}
                                             >
                                                 {range}
@@ -456,28 +457,28 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency }: Market
                                         <path
                                             d={chartData.areaPath}
                                             fill="url(#areaGrad)"
-                                            opacity="0.3"
+                                            opacity="0.15"
                                         />
 
-                                        {/* Gradient definition */}
+                                        {/* Gradient definitions */}
                                         <defs>
                                             <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.4" />
-                                                <stop offset="100%" stopColor="#3B82F6" stopOpacity="0" />
+                                                <stop offset="0%" stopColor="#374151" stopOpacity="0.3" />
+                                                <stop offset="100%" stopColor="#374151" stopOpacity="0" />
                                             </linearGradient>
                                         </defs>
 
-                                        {/* Price line */}
+                                        {/* Price line - clean and simple */}
                                         <path
                                             d={chartData.linePath}
                                             fill="none"
-                                            stroke="#2563EB"
-                                            strokeWidth="2.5"
+                                            stroke="#374151"
+                                            strokeWidth="1.5"
                                             strokeLinecap="round"
                                             strokeLinejoin="round"
                                         />
 
-                                        {/* Current price dot */}
+                                        {/* Current price dot - simple style */}
                                         {filteredHistory.length > 0 && (() => {
                                             const last = filteredHistory[filteredHistory.length - 1];
                                             const prices = filteredHistory.map(p => p.price * 100);
@@ -490,10 +491,10 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency }: Market
                                             const x = chartData.padLeft + chartData.chartW;
                                             const y = chartData.padTop + chartData.chartH - ((last.price * 100 - yMin) / yRange) * chartData.chartH;
                                             return (
-                                                <>
-                                                    <circle cx={x} cy={y} r="6" fill="#2563EB" opacity="0.2" />
-                                                    <circle cx={x} cy={y} r="3.5" fill="#2563EB" />
-                                                </>
+                                                <g>
+                                                    <circle cx={x} cy={y} r="4" fill="#374151" />
+                                                    <circle cx={x} cy={y} r="2" fill="white" />
+                                                </g>
                                             );
                                         })()}
 
@@ -623,21 +624,24 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency }: Market
                                 </div>
                             </div>
 
-                            {/* Error/Success */}
+                            {/* Error */}
                             {tradeError && (
                                 <div className="bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-sm border border-red-100">
                                     {tradeError}
                                 </div>
                             )}
-                            {tradeSuccess && (
-                                <div className="bg-green-50 text-green-600 p-3 rounded-xl mb-4 text-sm border border-green-100">
-                                    {tradeSuccess}
-                                </div>
-                            )}
 
                             {/* Submit Button */}
                             <button
-                                onClick={handleTrade}
+                                onClick={() => {
+                                    const qty = parseFloat(quantity);
+                                    if (!qty || qty <= 0) {
+                                        setTradeError('Please enter a valid quantity');
+                                        return;
+                                    }
+                                    setTradeError('');
+                                    setShowConfirmModal(true);
+                                }}
                                 disabled={processing}
                                 className="w-full py-3 bg-gray-900 hover:bg-black text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
@@ -647,6 +651,108 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency }: Market
                     </div>
                 </div>
             </div>
+
+            {/* Success Modal */}
+            {tradeSuccess && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl max-w-sm w-full p-8 text-center shadow-2xl">
+                        <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+                            <svg className="w-8 h-8 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                        </div>
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">Purchase Successful!</h3>
+                        <p className="text-sm text-gray-500">{tradeSuccess}</p>
+                        <p className="text-xs text-gray-400 mt-4">Refreshing page...</p>
+                    </div>
+                </div>
+            )}
+
+            {/* Confirmation Modal */}
+            {showConfirmModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-bold text-gray-900">Confirm Order</h3>
+                            <button
+                                onClick={() => setShowConfirmModal(false)}
+                                className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className="mb-6">
+                            <p className="text-sm text-gray-600 mb-4">Please review your order details:</p>
+
+                            <div className="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-200">
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-500">Market</span>
+                                    <span className="font-medium text-gray-900 text-right max-w-50 truncate">
+                                        {marketInfo.question}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-500">Position</span>
+                                    <span className={`font-bold ${selectedOutcome === 'YES' ? 'text-green-600' : 'text-red-600'}`}>
+                                        {selectedOutcome}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-500">Shares</span>
+                                    <span className="font-medium text-gray-900">{quantity}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-gray-500">Price per share</span>
+                                    <span className="font-medium text-gray-900">
+                                        {((selectedOutcome === 'YES' ? marketInfo.yesPrice : marketInfo.noPrice) || 0.5) * 100}¢
+                                    </span>
+                                </div>
+                                <div className="border-t border-gray-200 pt-3 mt-3">
+                                    <div className="flex justify-between">
+                                        <span className="font-bold text-gray-900">Total Cost</span>
+                                        <span className="font-bold text-gray-900">
+                                            ${(((selectedOutcome === 'YES' ? marketInfo.yesPrice : marketInfo.noPrice) || 0.5) * (parseFloat(quantity) || 0)).toFixed(2)}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                <div className="flex gap-2">
+                                    <svg className="w-5 h-5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    <p className="text-xs text-amber-700">
+                                        By confirming, you agree to purchase these shares. This action cannot be undone. Make sure you have sufficient balance.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setShowConfirmModal(false)}
+                                className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-all"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setShowConfirmModal(false);
+                                    handleTrade();
+                                }}
+                                disabled={processing}
+                                className="flex-1 py-3 bg-gray-900 hover:bg-black text-white font-bold rounded-xl transition-all disabled:opacity-50"
+                            >
+                                {processing ? 'Processing...' : 'Confirm Purchase'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
