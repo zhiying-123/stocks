@@ -586,11 +586,10 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                     title={isInWatchlist ? "Remove from favorites" : "Add to favorites"}
                                 >
                                     <svg
-                                        className={`w-5 h-5 transition-all ${
-                                            isInWatchlist
+                                        className={`w-5 h-5 transition-all ${isInWatchlist
                                                 ? 'text-yellow-500 fill-yellow-500'
                                                 : 'text-gray-300 hover:text-yellow-500'
-                                        } ${togglingWatchlist ? 'opacity-50' : ''}`}
+                                            } ${togglingWatchlist ? 'opacity-50' : ''}`}
                                         fill={isInWatchlist ? "currentColor" : "none"}
                                         stroke="currentColor"
                                         viewBox="0 0 24 24"
