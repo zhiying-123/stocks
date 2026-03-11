@@ -23,6 +23,7 @@ interface Market {
 interface PolymarketUIProps {
     markets: Market[];
     currency: string;
+    watchlist: string[];
 }
 
 // Helper to format volume
@@ -33,11 +34,60 @@ function formatVolume(vol?: number): string {
     return `$${vol.toFixed(0)}`;
 }
 
-export default function PolymarketUI({ markets, currency }: PolymarketUIProps) {
+export default function PolymarketUI({ markets, currency, watchlist: initialWatchlist }: PolymarketUIProps) {
     const router = useRouter();
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('All');
     const [featuredIndex, setFeaturedIndex] = useState(0);
+    const [watchlist, setWatchlist] = useState<string[]>(initialWatchlist);
+    const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
+    const [togglingWatchlist, setTogglingWatchlist] = useState<Set<string>>(new Set());
+
+    // Toggle watchlist
+    const toggleWatchlist = async (marketId: string, e?: React.MouseEvent) => {
+        if (e) {
+            e.stopPropagation();
+        }
+
+        // Prevent double-clicking
+        if (togglingWatchlist.has(marketId)) return;
+
+        setTogglingWatchlist(prev => new Set(prev).add(marketId));
+
+        try {
+            const isInWatchlist = watchlist.includes(marketId);
+
+            if (isInWatchlist) {
+                // Remove from watchlist
+                const res = await fetch(`/api/polymarket/watchlist?marketId=${encodeURIComponent(marketId)}`, {
+                    method: 'DELETE',
+                });
+
+                if (res.ok) {
+                    setWatchlist(prev => prev.filter(id => id !== marketId));
+                }
+            } else {
+                // Add to watchlist
+                const res = await fetch('/api/polymarket/watchlist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ marketId }),
+                });
+
+                if (res.ok) {
+                    setWatchlist(prev => [...prev, marketId]);
+                }
+            }
+        } catch (error) {
+            console.error('Failed to toggle watchlist:', error);
+        } finally {
+            setTogglingWatchlist(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(marketId);
+                return newSet;
+            });
+        }
+    };
 
     // Navigate to market detail page
     const goToMarket = (market: Market, outcome?: 'YES' | 'NO') => {
@@ -94,6 +144,10 @@ export default function PolymarketUI({ markets, currency }: PolymarketUIProps) {
     const filteredMarkets = markets.filter(market => {
         if (selectedCategory !== 'All' && market.category !== selectedCategory) return false;
         if (searchTerm && !market.question.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+        if (showWatchlistOnly) {
+            if (!market.conditionId) return false;
+            if (!watchlist.includes(market.conditionId)) return false;
+        }
         return true;
     });
 
@@ -116,7 +170,37 @@ export default function PolymarketUI({ markets, currency }: PolymarketUIProps) {
                     <div className="col-span-12 lg:col-span-7 flex flex-col">
                         {currentFeatured && (
                             <>
-                                <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow flex-1">
+                                <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-shadow flex-1 relative">
+                                    {/* Favorite Button - Top Right */}
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const marketId = currentFeatured.conditionId;
+                                            if (marketId) toggleWatchlist(marketId, e);
+                                        }}
+                                        disabled={!currentFeatured.conditionId || togglingWatchlist.has(currentFeatured.conditionId || '')}
+                                        className="absolute top-4 right-4 w-9 h-9 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all z-10"
+                                        title={currentFeatured.conditionId && watchlist.includes(currentFeatured.conditionId) ? "Remove from favorites" : "Add to favorites"}
+                                    >
+                                        <svg
+                                            className={`w-5 h-5 transition-all ${currentFeatured.conditionId && watchlist.includes(currentFeatured.conditionId)
+                                                    ? 'text-yellow-500 fill-yellow-500'
+                                                    : 'text-gray-300 hover:text-yellow-500'
+                                                } ${currentFeatured.conditionId && togglingWatchlist.has(currentFeatured.conditionId) ? 'opacity-50' : ''
+                                                }`}
+                                            fill={currentFeatured.conditionId && watchlist.includes(currentFeatured.conditionId) ? "currentColor" : "none"}
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                                            />
+                                        </svg>
+                                    </button>
+
                                     <div className="flex items-start gap-5">
                                         {/* Image */}
                                         {currentFeatured.image && (
@@ -319,6 +403,20 @@ export default function PolymarketUI({ markets, currency }: PolymarketUIProps) {
                                 })}
                             </div>
 
+                            {/* Watchlist Filter Button */}
+                            <button
+                                onClick={() => setShowWatchlistOnly(!showWatchlistOnly)}
+                                className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${showWatchlistOnly
+                                    ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    }`}
+                            >
+                                <svg className="w-4 h-4" fill={showWatchlistOnly ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                                </svg>
+                                {showWatchlistOnly ? 'Favorites' : 'All Markets'}
+                            </button>
+
                             {/* Search */}
                             <div className="relative w-full sm:w-64">
                                 <input
@@ -337,6 +435,7 @@ export default function PolymarketUI({ markets, currency }: PolymarketUIProps) {
                         {/* Results count */}
                         <div className="mt-3 text-sm text-gray-500">
                             {filteredMarkets.length} markets
+                            {showWatchlistOnly && ` (${watchlist.length} favorites)`}
                         </div>
                     </div>
 
@@ -359,38 +458,69 @@ export default function PolymarketUI({ markets, currency }: PolymarketUIProps) {
                                 const yesPct = (yesPrice * 100).toFixed(0);
                                 const yesPctNum = parseInt(yesPct);
                                 const pctColor = getProbabilityColor(yesPctNum);
+                                const marketId = market.conditionId;
+                                const inWatchlist = marketId ? watchlist.includes(marketId) : false;
+                                const isToggling = marketId ? togglingWatchlist.has(marketId) : false;
 
                                 return (
                                     <div
                                         key={market.id}
-                                        className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md hover:border-gray-300 transition-all cursor-pointer group"
+                                        className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md hover:border-gray-300 transition-all group relative"
                                     >
+                                        {/* Watchlist Button - Top Right */}
+                                        <button
+                                            onClick={(e) => marketId && toggleWatchlist(marketId, e)}
+                                            disabled={isToggling || !marketId}
+                                            className="absolute top-3 right-3 w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all z-10"
+                                            title={inWatchlist ? "Remove from favorites" : "Add to favorites"}
+                                        >
+                                            <svg
+                                                className={`w-5 h-5 transition-all ${inWatchlist ? 'text-yellow-500 fill-yellow-500' : 'text-gray-300 hover:text-yellow-500'
+                                                    } ${isToggling ? 'opacity-50' : ''}`}
+                                                fill={inWatchlist ? "currentColor" : "none"}
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeWidth={2}
+                                                    d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                                                />
+                                            </svg>
+                                        </button>
+
                                         {/* Header */}
-                                        <div className="flex items-start justify-between mb-3">
-                                            <div className="flex items-center gap-2">
-                                                {market.image ? (
-                                                    <img
-                                                        src={market.image}
-                                                        alt=""
-                                                        className="w-8 h-8 rounded-lg object-cover"
-                                                        onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
-                                                    />
-                                                ) : (
-                                                    <div className="w-8 h-8 rounded-lg bg-linear-to-br from-blue-200 to-purple-200" />
-                                                )}
-                                                <span className="text-xs text-gray-500">{market.category}</span>
+                                        <div
+                                            onClick={() => goToMarket(market)}
+                                            className="cursor-pointer"
+                                        >
+                                            <div className="flex items-start justify-between mb-3 pr-8">
+                                                <div className="flex items-center gap-2">
+                                                    {market.image ? (
+                                                        <img
+                                                            src={market.image}
+                                                            alt=""
+                                                            className="w-8 h-8 rounded-lg object-cover"
+                                                            onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+                                                        />
+                                                    ) : (
+                                                        <div className="w-8 h-8 rounded-lg bg-linear-to-br from-blue-200 to-purple-200" />
+                                                    )}
+                                                    <span className="text-xs text-gray-500">{market.category}</span>
+                                                </div>
+                                                <span className={`text-lg font-bold ${pctColor}`}>{yesPct}%</span>
                                             </div>
-                                            <span className={`text-lg font-bold ${pctColor}`}>{yesPct}%</span>
-                                        </div>
 
-                                        {/* Question */}
-                                        <h4 className="text-sm font-semibold text-gray-900 leading-tight mb-3 line-clamp-2 min-h-10">
-                                            {market.question}
-                                        </h4>
+                                            {/* Question */}
+                                            <h4 className="text-sm font-semibold text-gray-900 leading-tight mb-3 line-clamp-2 min-h-10">
+                                                {market.question}
+                                            </h4>
 
-                                        {/* Volume */}
-                                        <div className="text-xs text-gray-400 mb-3">
-                                            {formatVolume(market.volume)} volume
+                                            {/* Volume */}
+                                            <div className="text-xs text-gray-400 mb-3">
+                                                {formatVolume(market.volume)} volume
+                                            </div>
                                         </div>
 
                                         {/* Trade Buttons */}

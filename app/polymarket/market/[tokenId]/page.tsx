@@ -112,5 +112,19 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ t
     const wallet = user?.id ? await getUserWallet(user.id) : null;
     const currency = wallet?.currency || "MYR";
 
-    return <MarketDetailUI marketInfo={marketInfo} tokenId={tokenId} currency={currency} />;
+    // Check if market is in user's watchlist
+    let isInWatchlist = false;
+    if (user?.id) {
+        const watchlistItem = await prisma.polymarketWatchlist.findUnique({
+            where: {
+                u_id_market_id: {
+                    u_id: user.id,
+                    market_id: tokenId,
+                },
+            },
+        });
+        isInWatchlist = !!watchlistItem;
+    }
+
+    return <MarketDetailUI marketInfo={marketInfo} tokenId={tokenId} currency={currency} isInWatchlist={isInWatchlist} />;
 }

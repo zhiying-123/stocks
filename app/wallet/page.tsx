@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import WalletUI from "../h_stocks/wallet/walletUI";
 
+export const dynamic = 'force-dynamic';
+
 async function getAuthState() {
     const cookieStore = await cookies();
     const isLoggedIn = cookieStore.get("auth")?.value === "true";
@@ -22,6 +24,14 @@ async function getWalletData(userId: number) {
         where: { u_id: userId },
         orderBy: { transaction_date: "desc" },
     });
+
+    console.log("[WALLET PAGE] Found", walletTransactions.length, "wallet transactions for user", userId);
+    console.log("[WALLET PAGE] Sample transactions:", walletTransactions.slice(0, 3).map(tx => ({
+        type: tx.transaction_type,
+        amount: tx.amount,
+        currency: tx.currency,
+        description: tx.description
+    })));
 
     // Get stock transactions (for backward compatibility with old data)
     const stockTransactions = await prisma.stockTransaction.findMany({

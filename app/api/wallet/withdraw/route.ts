@@ -62,6 +62,18 @@ export async function POST(req: NextRequest) {
             newBalance: Number(updatedWallet.balance)
         });
 
+        // Create wallet transaction record for the withdrawal
+        await prisma.walletTransaction.create({
+            data: {
+                u_id: user.id,
+                transaction_type: "WITHDRAW",
+                amount: amount,
+                currency: updatedWallet.currency,
+                balance_after: Number(updatedWallet.balance),
+                description: "Wallet withdrawal",
+            },
+        });
+
         return NextResponse.json({
             success: true,
             newBalance: Number(updatedWallet.balance),

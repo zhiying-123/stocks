@@ -20,6 +20,7 @@ export default function TopUpUI({
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState<{ amount: number; newBalance: number } | null>(null);
     const [error, setError] = useState('');
+    const [redirectCountdown, setRedirectCountdown] = useState(3);
 
     // Check for Stripe redirect results
     useEffect(() => {
@@ -28,9 +29,11 @@ export default function TopUpUI({
         const amountParam = searchParams.get('amount');
 
         if (successParam === 'true' && amountParam) {
-            // Payment successful - update balance immediately
+            // Payment successful - update balance
             const amount = parseFloat(amountParam);
 
+            // In development, Stripe webhook might not work (localhost)
+            // So we call the API to update balance immediately
             async function completeTopUp() {
                 try {
                     const res = await fetch('/api/wallet/topup-complete', {
@@ -45,23 +48,37 @@ export default function TopUpUI({
                             amount: amount,
                             newBalance: data.newBalance
                         });
-                        router.refresh();
+
+                        // After 3 seconds, redirect back to wallet page
+                        setTimeout(() => {
+                            router.push('/h_stocks/wallet');
+                        }, 3000);
                     } else {
-                        setError('Payment successful but balance update failed. Please refresh the page.');
+                        setError('Payment successful but balance update failed. Please contact support.');
+                        console.error('[TOP-UP] Balance update failed:', data);
                     }
-                } catch {
+                } catch (err) {
                     setError('Payment successful but balance update failed. Please refresh the page.');
+                    console.error('[TOP-UP] Network error:', err);
                 }
             }
 
             completeTopUp();
-            // Clear URL parameters
-            window.history.replaceState({}, '', '/h_stocks/wallet/topup');
         } else if (canceledParam === 'true') {
             setError('Payment was canceled');
             window.history.replaceState({}, '', '/h_stocks/wallet/topup');
         }
     }, [searchParams, router]);
+
+    // Countdown timer for redirect
+    useEffect(() => {
+        if (success && redirectCountdown > 0) {
+            const timer = setTimeout(() => {
+                setRedirectCountdown(redirectCountdown - 1);
+            }, 1000);
+            return () => clearTimeout(timer);
+        }
+    }, [success, redirectCountdown]);
 
     const topUpAmount = selectedPreset ?? (customAmount ? parseFloat(customAmount) : 0);
 
@@ -119,7 +136,10 @@ export default function TopUpUI({
                         </svg>
                     </div>
                     <h2 className="text-xl font-bold text-gray-900 mb-1">Top Up Successful!</h2>
-                    <p className="text-sm text-gray-400 mb-6">Your wallet has been credited</p>
+                    <p className="text-sm text-gray-400 mb-2">Your wallet has been credited</p>
+                    <p className="text-xs text-gray-400 mb-6">
+                        Redirecting to Wallet in {redirectCountdown} second{redirectCountdown !== 1 ? 's' : ''}...
+                    </p>
 
                     <div className="bg-gray-50 rounded-xl p-5 mb-6 space-y-3">
                         <div className="flex justify-between">
@@ -130,24 +150,29 @@ export default function TopUpUI({
                         </div>
                         <div className="border-t border-gray-200" />
                         <div className="flex justify-between">
-                            <span className="text-xs text-gray-400">New Balance</span>
+                            <span className="text-xs text-gray-400">Estimated New Balance</span>
                             <span className="text-sm font-bold text-gray-900">
                                 {currency} {success.newBalance.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
                             </span>
                         </div>
+                        <p className="text-xs text-gray-400 mt-2">
+                            * Balance may take a few moments to update
+                        </p>
                     </div>
 
                     <div className="flex gap-3">
-                        <button
+                        <Link
+                            href="/h_stocks/wallet/topup"
                             onClick={() => {
                                 setSuccess(null);
                                 setSelectedPreset(null);
                                 setCustomAmount('');
+                                setRedirectCountdown(3);
                             }}
-                            className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+                            className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors text-center"
                         >
                             Top Up Again
-                        </button>
+                        </Link>
                         <Link
                             href="/h_stocks/wallet"
                             className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold bg-gray-900 text-white hover:bg-gray-800 transition-colors text-center"

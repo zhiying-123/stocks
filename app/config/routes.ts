@@ -37,6 +37,12 @@ export const stocksRoutes: RouteConfig[] = [
 // Polymarket Module Routes
 export const polymarketRoutes: RouteConfig[] = [
     {
+        path: "/polymarket/overview",
+        label: "Overview",
+        icon: "📊",
+        description: "Portfolio overview"
+    },
+    {
         path: "/polymarket",
         label: "Markets",
         icon: "🎯",

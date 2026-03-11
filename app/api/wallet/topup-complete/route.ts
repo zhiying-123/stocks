@@ -28,6 +28,36 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Wallet not found" }, { status: 404 });
         }
 
+        // Check for duplicate deposit in the last 5 minutes (prevent double charging)
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+        const recentDeposit = await prisma.walletTransaction.findFirst({
+            where: {
+                u_id: user.id,
+                transaction_type: "DEPOSIT",
+                amount: amount,
+                transaction_date: {
+                    gte: fiveMinutesAgo,
+                },
+            },
+            orderBy: {
+                transaction_date: "desc",
+            },
+        });
+
+        if (recentDeposit) {
+            console.log("[TOP-UP COMPLETE] Duplicate deposit detected, skipping:", {
+                userId: user.id,
+                amount,
+                recentDepositId: recentDeposit.transaction_id,
+            });
+            // Return success with current balance (don't charge again)
+            return NextResponse.json({
+                success: true,
+                newBalance: Number(wallet.balance),
+                duplicate: true,
+            });
+        }
+
         // Update wallet balance
         const updatedWallet = await prisma.userWallet.update({
             where: { u_id: user.id },
@@ -43,6 +73,18 @@ export async function POST(req: NextRequest) {
             userId: user.id,
             amount,
             newBalance: Number(updatedWallet.balance),
+        });
+
+        // Create wallet transaction record for the deposit
+        await prisma.walletTransaction.create({
+            data: {
+                u_id: user.id,
+                transaction_type: "DEPOSIT",
+                amount: amount,
+                currency: wallet.currency,
+                balance_after: Number(updatedWallet.balance),
+                description: "Payment completed (Stripe)",
+            },
         });
 
         return NextResponse.json({

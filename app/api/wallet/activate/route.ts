@@ -30,6 +30,18 @@ export async function POST(req: NextRequest) {
 
         console.log("[WALLET ACTIVATE] Created wallet for user", user.id, "with welcome bonus RM 10.00");
 
+        // Create wallet transaction record for the welcome bonus
+        await prisma.walletTransaction.create({
+            data: {
+                u_id: user.id,
+                transaction_type: "DEPOSIT",
+                amount: 10.00,
+                currency: wallet.currency,
+                balance_after: wallet.balance,
+                description: "Welcome bonus",
+            },
+        });
+
         // Revalidate pages
         revalidatePath('/h_stocks/wallet');
         revalidatePath('/h_stocks');

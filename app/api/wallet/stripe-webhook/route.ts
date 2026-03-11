@@ -53,13 +53,40 @@ export async function POST(req: NextRequest) {
                 });
 
                 if (wallet) {
-                    await prisma.userWallet.update({
+                    // Check if this payment was already processed (prevent duplicate)
+                    const sessionId = session.id;
+                    const existingTransaction = await prisma.walletTransaction.findFirst({
+                        where: {
+                            u_id: userId,
+                            description: { contains: sessionId },
+                            transaction_type: "DEPOSIT",
+                        },
+                    });
+
+                    if (existingTransaction) {
+                        console.log("[STRIPE WEBHOOK] Transaction already processed, skipping:", sessionId);
+                        return NextResponse.json({ received: true, duplicate: true });
+                    }
+
+                    const updatedWallet = await prisma.userWallet.update({
                         where: { u_id: userId },
                         data: {
                             balance: {
                                 increment: amount,
                             },
                             updated_at: new Date(),
+                        },
+                    });
+
+                    // Create wallet transaction record for the deposit
+                    await prisma.walletTransaction.create({
+                        data: {
+                            u_id: userId,
+                            transaction_type: "DEPOSIT",
+                            amount: amount,
+                            currency: wallet.currency,
+                            balance_after: Number(updatedWallet.balance),
+                            description: `Stripe payment confirmed (${sessionId})`,
                         },
                     });
 

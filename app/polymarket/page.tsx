@@ -122,5 +122,14 @@ export default async function PolymarketPage() {
     const wallet = user?.id ? await getUserWallet(user.id) : null;
     const currency = wallet?.currency || "MYR";
 
-    return <PolymarketUI markets={markets} currency={currency} />;
+    // Fetch user's watchlist
+    let watchlist: string[] = [];
+    if (user?.id) {
+        const userWatchlist = await prisma.polymarketWatchlist.findMany({
+            where: { u_id: user.id }
+        });
+        watchlist = userWatchlist.map((w: any) => w.market_id);
+    }
+
+    return <PolymarketUI markets={markets} currency={currency} watchlist={watchlist} />;
 }

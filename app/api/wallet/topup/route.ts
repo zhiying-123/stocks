@@ -40,8 +40,9 @@ export async function POST(req: NextRequest) {
 
         if (newBalance > MAX_BALANCE) {
             const availableAmount = MAX_BALANCE - existingWallet.balance;
+            const currencySymbol = existingWallet.currency === "MYR" ? "RM" : existingWallet.currency;
             return NextResponse.json({
-                error: `Cannot top up. Maximum wallet balance is RM ${MAX_BALANCE.toLocaleString()}. You can only add up to RM ${availableAmount.toFixed(2)} more.`
+                error: `Cannot top up. Maximum wallet balance is ${currencySymbol} ${MAX_BALANCE.toLocaleString()}. You can only add up to ${currencySymbol} ${availableAmount.toFixed(2)} more.`
             }, { status: 400 });
         }
 
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
             create: {
                 u_id: user.id,
                 balance: 10.00 + amount,
-                currency: "MYR",
+                currency: existingWallet.currency,
             },
             update: {
                 balance: { increment: amount },
@@ -60,6 +61,18 @@ export async function POST(req: NextRequest) {
 
         console.log("[TOP-UP API] Balance AFTER top-up:", wallet.balance);
         console.log("[TOP-UP API] Returning newBalance:", wallet.balance);
+
+        // Create wallet transaction record for the deposit
+        await prisma.walletTransaction.create({
+            data: {
+                u_id: user.id,
+                transaction_type: "DEPOSIT",
+                amount: amount,
+                currency: wallet.currency,
+                balance_after: wallet.balance,
+                description: "Wallet top-up",
+            },
+        });
 
         // Revalidate cached pages so they show the updated balance
         revalidatePath('/h_stocks/wallet');

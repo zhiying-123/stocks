@@ -126,3 +126,13 @@ model PolymarketTransaction {
   @@index([market_id])
   @@index([transaction_date])
 }
+
+model PolymarketWatchlist {
+  watchlist_id Int      @id @default(autoincrement())
+  u_id         Int
+  market_id    String // Polymarket market condition ID
+  added_at     DateTime @default(now())
+
+  @@unique([u_id, market_id])
+  @@index([u_id])
+}

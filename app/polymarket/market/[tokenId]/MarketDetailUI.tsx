@@ -27,9 +27,10 @@ interface MarketDetailUIProps {
     marketInfo: MarketInfo;
     tokenId: string;
     currency: string;
+    isInWatchlist: boolean;
 }
 
-export default function MarketDetailUI({ marketInfo, tokenId, currency }: MarketDetailUIProps) {
+export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatchlist: initialIsInWatchlist }: MarketDetailUIProps) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const outcomeParam = searchParams?.get('outcome');
@@ -38,6 +39,8 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency }: Market
     const [error, setError] = useState<string | null>(null);
     const [rawHistory, setRawHistory] = useState<any[]>([]);
     const [timeRange, setTimeRange] = useState<TimeRange>('1W');
+    const [isInWatchlist, setIsInWatchlist] = useState(initialIsInWatchlist);
+    const [togglingWatchlist, setTogglingWatchlist] = useState(false);
 
     // Trade form state
     const [selectedOutcome, setSelectedOutcome] = useState<'YES' | 'NO'>(
@@ -244,6 +247,41 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency }: Market
         if (!marketInfo?.yesPrice) return undefined;
         return (marketInfo.yesPrice * 100).toFixed(0);
     }, [marketInfo]);
+
+    // Toggle watchlist
+    const toggleWatchlist = async () => {
+        if (togglingWatchlist) return;
+
+        setTogglingWatchlist(true);
+
+        try {
+            if (isInWatchlist) {
+                // Remove from watchlist
+                const res = await fetch(`/api/polymarket/watchlist?marketId=${encodeURIComponent(tokenId)}`, {
+                    method: 'DELETE',
+                });
+
+                if (res.ok) {
+                    setIsInWatchlist(false);
+                }
+            } else {
+                // Add to watchlist
+                const res = await fetch('/api/polymarket/watchlist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ marketId: tokenId }),
+                });
+
+                if (res.ok) {
+                    setIsInWatchlist(true);
+                }
+            }
+        } catch (error) {
+            console.error('Failed to toggle watchlist:', error);
+        } finally {
+            setTogglingWatchlist(false);
+        }
+    };
 
     // Handle trade submission
     async function handleTrade() {
@@ -539,7 +577,33 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency }: Market
                     {/* Right Side: Trade Panel */}
                     <div className="lg:col-span-1">
                         <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm sticky top-6">
-                            <h2 className="text-lg font-bold text-gray-900 mb-4">Trade</h2>
+                            <div className="flex items-center justify-between mb-4">
+                                <h2 className="text-lg font-bold text-gray-900">Trade</h2>
+                                <button
+                                    onClick={toggleWatchlist}
+                                    disabled={togglingWatchlist}
+                                    className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all"
+                                    title={isInWatchlist ? "Remove from favorites" : "Add to favorites"}
+                                >
+                                    <svg
+                                        className={`w-5 h-5 transition-all ${
+                                            isInWatchlist
+                                                ? 'text-yellow-500 fill-yellow-500'
+                                                : 'text-gray-300 hover:text-yellow-500'
+                                        } ${togglingWatchlist ? 'opacity-50' : ''}`}
+                                        fill={isInWatchlist ? "currentColor" : "none"}
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                                        />
+                                    </svg>
+                                </button>
+                            </div>
 
                             {/* Outcome Selection */}
                             <div className="grid grid-cols-2 gap-3 mb-6">

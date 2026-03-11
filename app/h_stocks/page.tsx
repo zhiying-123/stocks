@@ -35,8 +35,25 @@ async function getOverviewData() {
             }
             if (holdings.length > 0) {
                 portfolio.holdingsCount = holdings.length;
-                const holdingsValue = holdings.reduce(
-                    (sum: number, h: any) => sum + h.quantity * h.avg_price, 0
+
+                // Fetch current prices for all holdings
+                const holdingsWithPrices = await Promise.all(
+                    holdings.map(async (h: any) => {
+                        const quote = await fetchStockQuote(h.symbol);
+                        const currentPrice = quote?.c ?? h.avg_price;
+                        return {
+                            ...h,
+                            currentPrice,
+                            gainLoss: (currentPrice - h.avg_price) * h.quantity
+                        };
+                    })
+                );
+
+                const holdingsValue = holdingsWithPrices.reduce(
+                    (sum: number, h: any) => sum + h.quantity * h.currentPrice, 0
+                );
+                portfolio.totalGainLoss = holdingsWithPrices.reduce(
+                    (sum: number, h: any) => sum + h.gainLoss, 0
                 );
                 portfolio.totalValue = holdingsValue + portfolio.cashBalance;
             } else {
@@ -121,19 +138,19 @@ export default async function HStocksPage() {
                     </div>
                 </div>
 
-                <div className="group bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-all">
+                <div className={`group rounded-2xl p-6 border shadow-sm hover:shadow-md transition-all ${portfolio.totalGainLoss >= 0 ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
                     <div className="flex items-center justify-between mb-4">
                         <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Gain / Loss</span>
-                        <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center">
-                            <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${portfolio.totalGainLoss >= 0 ? 'bg-green-100' : 'bg-red-100'}`}>
+                            <svg className={`w-4 h-4 ${portfolio.totalGainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                             </svg>
                         </div>
                     </div>
-                    <p className="text-2xl font-bold text-gray-900 mb-1">
-                        {currency} {portfolio.totalGainLoss.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
+                    <p className={`text-2xl font-bold mb-1 ${portfolio.totalGainLoss >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                        {portfolio.totalGainLoss >= 0 ? '+' : ''}{currency} {portfolio.totalGainLoss.toLocaleString('en-MY', { minimumFractionDigits: 2 })}
                     </p>
-                    <span className="text-xs text-gray-400">All time</span>
+                    <span className="text-xs text-gray-500">Stock holdings only</span>
                 </div>
 
                 <div className="group bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-all">
@@ -166,7 +183,7 @@ export default async function HStocksPage() {
             </div>
 
             {/* Quick Access Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 <QuickLink
                     href="/h_stocks/stocks"
                     title="Stock Market"
@@ -185,44 +202,10 @@ export default async function HStocksPage() {
                     desc="Analyze performance"
                     icon={<svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5m.75-9l3-3 2.148 2.148A12.061 12.061 0 0116.5 7.605" /></svg>}
                 />
-                <QuickLink
-                    href="/h_stocks/wallet"
-                    title="Wallet"
-                    desc="Manage your balance"
-                    icon={<svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" /></svg>}
-                />
             </div>
 
             {/* Watchlist */}
             <WatchlistSection items={watchlistItems} />
-
-            {/* Market Info */}
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
-                <div className="flex items-center gap-2 mb-5">
-                    <div className="w-1.5 h-5 rounded-full bg-gray-900" />
-                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Market Info</h3>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                    <div>
-                        <span className="text-xs text-gray-400 block mb-1">Market</span>
-                        <span className="text-sm font-semibold text-gray-900">US Stocks</span>
-                    </div>
-                    <div>
-                        <span className="text-xs text-gray-400 block mb-1">Data Source</span>
-                        <span className="text-sm font-semibold text-gray-900">Finnhub</span>
-                    </div>
-                    <div>
-                        <span className="text-xs text-gray-400 block mb-1">Currency</span>
-                        <span className="text-sm font-semibold text-gray-900">{currency}</span>
-                    </div>
-                    <div>
-                        <span className="text-xs text-gray-400 block mb-1">Date</span>
-                        <span className="text-sm font-semibold text-gray-900">
-                            {new Date().toLocaleDateString('en-MY', { month: 'short', day: 'numeric', year: 'numeric' })}
-                        </span>
-                    </div>
-                </div>
-            </div>
         </div>
     );
 }
