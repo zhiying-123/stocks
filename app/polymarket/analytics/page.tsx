@@ -1,36 +1,51 @@
 // Polymarket Analytics Page
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import prisma from "@/lib/prisma";
+import PolymarketAnalyticsUI from "./polymarketAnalyticsUI";
 
 async function getAuthState() {
     const cookieStore = await cookies();
     const isLoggedIn = cookieStore.get("auth")?.value === "true";
-    return { isLoggedIn };
+    const userCookie = cookieStore.get("user")?.value;
+    const user = userCookie ? JSON.parse(userCookie) : null;
+    return { isLoggedIn, user };
+}
+
+async function getAnalyticsData(userId: number) {
+    // Get user wallet
+    const wallet = await prisma.userWallet.findUnique({
+        where: { u_id: userId },
+    });
+
+    // Get all holdings
+    const holdings = await prisma.polymarketHolding.findMany({
+        where: { u_id: userId },
+        orderBy: { updated_at: 'desc' },
+    });
+
+    // Get all transactions
+    const transactions = await prisma.polymarketTransaction.findMany({
+        where: { u_id: userId },
+        orderBy: { transaction_date: 'desc' },
+    });
+
+    return {
+        wallet,
+        holdings,
+        transactions,
+    };
 }
 
 export default async function AnalyticsPage() {
-    const { isLoggedIn } = await getAuthState();
+    const { isLoggedIn, user } = await getAuthState();
 
     if (!isLoggedIn) {
         redirect("/login");
     }
 
-    return (
-        <div className="space-y-6">
-            <div>
-                <h1 className="text-3xl font-bold text-gray-900">Market Analytics</h1>
-                <p className="text-gray-600 mt-1">
-                    Insights and trends across prediction markets
-                </p>
-            </div>
+    const { wallet, holdings, transactions } = await getAnalyticsData(user.id);
+    const currency = wallet?.currency || "MYR";
 
-            <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-                <div className="text-4xl mb-4">📊</div>
-                <p className="text-lg font-medium text-gray-900">Analytics Coming Soon</p>
-                <p className="text-sm text-gray-600 mt-2">
-                    Advanced market analytics will be available shortly
-                </p>
-            </div>
-        </div>
-    );
+    return <PolymarketAnalyticsUI holdings={holdings} transactions={transactions} currency={currency} />;
 }

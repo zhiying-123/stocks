@@ -637,7 +637,15 @@ export default function WalletUI({
                                             </svg>
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-semibold text-gray-900">{label}</p>
+                                            <div className="flex items-center gap-2 mb-0.5">
+                                                <p className="text-sm font-semibold text-gray-900">{label}</p>
+                                                {/* Show Market ID for Polymarket transactions */}
+                                                {(isPolymarketBuy || isPolymarketSell) && tx.symbol && (
+                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-purple-50 text-purple-600 border border-purple-200">
+                                                        ID: {tx.symbol.slice(0, 8)}...
+                                                    </span>
+                                                )}
+                                            </div>
                                             <p className="text-xs text-gray-400">
                                                 {(() => {
                                                     // For Polymarket transactions, show outcome and quantity
