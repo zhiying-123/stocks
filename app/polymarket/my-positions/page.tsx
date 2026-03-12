@@ -76,9 +76,10 @@ export default async function MyPositionsPage() {
     const marketIds = holdings.map(h => h.market_id);
     const marketDetails = await getMarketDetails(marketIds);
 
-    // Transform holdings to include current prices
+    // Transform holdings to include current prices and category
     const enrichedHoldings = holdings.map(holding => ({
         ...holding,
+        category: holding.category || undefined, // Explicitly include category
         marketQuestion: marketDetails[holding.market_id]?.question || `Market ${holding.market_id}`,
         currentPrice: holding.outcome === 'YES'
             ? marketDetails[holding.market_id]?.currentYesPrice || 0.5

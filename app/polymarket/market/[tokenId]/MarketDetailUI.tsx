@@ -319,6 +319,7 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                     outcome: selectedOutcome,
                     quantity: qty,
                     pricePerShare: pricePerShare,
+                    category: marketInfo.category,
                 }),
             });
 
@@ -587,8 +588,8 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                 >
                                     <svg
                                         className={`w-5 h-5 transition-all ${isInWatchlist
-                                                ? 'text-yellow-500 fill-yellow-500'
-                                                : 'text-gray-300 hover:text-yellow-500'
+                                            ? 'text-yellow-500 fill-yellow-500'
+                                            : 'text-gray-300 hover:text-yellow-500'
                                             } ${togglingWatchlist ? 'opacity-50' : ''}`}
                                         fill={isInWatchlist ? "currentColor" : "none"}
                                         stroke="currentColor"

@@ -101,6 +101,7 @@ model PolymarketHolding {
   outcome    String // "YES" or "NO"
   quantity   Float // Number of shares
   avg_price  Float // Average price per share in USD
+  category   String? // Market category (e.g., "Sports", "Politics", "Crypto")
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -119,6 +120,7 @@ model PolymarketTransaction {
   price            Float // Price per share in USD
   total_amount     Float // Total in USD
   currency         String   @default("MYR") // Wallet currency used
+  category         String? // Market category (e.g., "Sports", "Politics", "Crypto")
   transaction_date DateTime @default(now())
   created_at       DateTime @default(now())
 

@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        const { marketId, outcome, quantity, pricePerShare } = await request.json();
+        const { marketId, outcome, quantity, pricePerShare, category } = await request.json();
 
         // Validate input
         if (!marketId || !outcome || !quantity || !pricePerShare) {
@@ -131,21 +131,7 @@ export async function POST(request: NextRequest) {
                     price: pricePerShare,
                     total_amount: totalProceedsUSD,
                     currency: currency,
-                },
-            });
-
-            // 4. Record wallet transaction for tracking money flow
-            await tx.walletTransaction.create({
-                data: {
-                    u_id: user.id,
-                    transaction_type: "POLYMARKET_SELL",
-                    amount: totalProceedsInWalletCurrency,
-                    currency: currency,
-                    symbol: marketId,
-                    quantity: Math.round(quantity),
-                    price: pricePerShare,
-                    description: `Sold ${quantity} ${outcome} shares`,
-                    balance_after: updatedWallet.balance,
+                    category: category || null,
                 },
             });
 

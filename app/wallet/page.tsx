@@ -19,19 +19,19 @@ async function getWalletData(userId: number) {
         where: { u_id: userId },
     });
 
-    // Get all wallet transactions (DEPOSIT, WITHDRAW, and new STOCK/POLYMARKET transactions)
+    // Get all wallet transactions (DEPOSIT and WITHDRAW only)
     const walletTransactions = await prisma.walletTransaction.findMany({
-        where: { u_id: userId },
+        where: {
+            u_id: userId,
+            OR: [
+                { transaction_type: 'DEPOSIT' },
+                { transaction_type: 'WITHDRAW' }
+            ]
+        },
         orderBy: { transaction_date: "desc" },
     });
 
-    console.log("[WALLET PAGE] Found", walletTransactions.length, "wallet transactions for user", userId);
-    console.log("[WALLET PAGE] Sample transactions:", walletTransactions.slice(0, 3).map(tx => ({
-        type: tx.transaction_type,
-        amount: tx.amount,
-        currency: tx.currency,
-        description: tx.description
-    })));
+    console.log("[WALLET PAGE] Found", walletTransactions.length, "wallet transactions (deposit/withdraw) for user", userId);
 
     // Get stock transactions (for backward compatibility with old data)
     const stockTransactions = await prisma.stockTransaction.findMany({
@@ -39,25 +39,28 @@ async function getWalletData(userId: number) {
         orderBy: { transaction_date: "desc" },
     });
 
-    // Get polymarket transactions (for backward compatibility with old data)
+    // Get polymarket transactions
     let polymarketTransactions: any[] = [];
     try {
         polymarketTransactions = await prisma.polymarketTransaction.findMany({
             where: { u_id: userId },
             orderBy: { transaction_date: "desc" },
         });
+        console.log("[WALLET PAGE] Found", polymarketTransactions.length, "polymarket transactions for user", userId);
     } catch (error) {
         console.log("PolymarketTransaction table not available");
     }
 
     // Create a set of transaction IDs that already exist in WalletTransaction
+    // Use a simpler key that matches by type, symbol, and date (rounded to second)
     const walletTxKeys = new Set(
-        walletTransactions
-            .filter(tx => tx.symbol) // Only consider wallet transactions with symbols
-            .map(tx => `${tx.transaction_type}-${tx.symbol}-${new Date(tx.transaction_date).getTime()}`)
+        walletTransactions.map(tx => {
+            const dateKey = Math.floor(new Date(tx.transaction_date).getTime() / 1000); // Round to second
+            return `${tx.transaction_type}-${tx.symbol || 'null'}-${dateKey}`;
+        })
     );
 
-    // Transform wallet transactions
+    // Transform wallet transactions (DEPOSIT and WITHDRAW only)
     const mappedWalletTx = walletTransactions.map((tx: any) => ({
         id: `w-${tx.transaction_id}`,
         symbol: tx.symbol || "",
@@ -74,7 +77,8 @@ async function getWalletData(userId: number) {
     // Transform stock transactions (only include those not in WalletTransaction)
     const mappedStockTx = stockTransactions
         .filter((tx: any) => {
-            const key = `STOCK_${tx.transaction_type.toUpperCase()}-${tx.symbol}-${new Date(tx.transaction_date).getTime()}`;
+            const dateKey = Math.floor(new Date(tx.transaction_date).getTime() / 1000);
+            const key = `STOCK_${tx.transaction_type.toUpperCase()}-${tx.symbol}-${dateKey}`;
             return !walletTxKeys.has(key);
         })
         .map((tx: any) => ({
@@ -88,23 +92,19 @@ async function getWalletData(userId: number) {
             date: tx.transaction_date.toISOString(),
         }));
 
-    // Transform polymarket transactions (only include those not in WalletTransaction)
-    const mappedPolyTx = polymarketTransactions
-        .filter((tx: any) => {
-            const key = `POLYMARKET_${tx.transaction_type.toUpperCase()}-${tx.market_id}-${new Date(tx.transaction_date).getTime()}`;
-            return !walletTxKeys.has(key);
-        })
-        .map((tx: any) => ({
-            id: `p-${tx.transaction_id}`,
-            symbol: tx.market_id || "",
-            type: `POLYMARKET_${tx.transaction_type.toUpperCase()}`,
-            quantity: tx.quantity,
-            price: tx.price,
-            totalAmount: tx.total_amount,
-            currency: tx.currency,
-            description: `${tx.outcome} shares`,
-            date: tx.transaction_date.toISOString(),
-        }));
+    // Transform polymarket transactions
+    const mappedPolyTx = polymarketTransactions.map((tx: any) => ({
+        id: `p-${tx.transaction_id}`,
+        symbol: tx.market_id || "",
+        type: `POLYMARKET_${tx.transaction_type.toUpperCase()}`,
+        quantity: tx.quantity,
+        price: tx.price,
+        totalAmount: tx.total_amount,
+        currency: tx.currency,
+        category: tx.category,
+        outcome: tx.outcome,
+        date: tx.transaction_date.toISOString(),
+    }));
 
     // Merge all transactions and sort by date
     const transactions = [...mappedWalletTx, ...mappedStockTx, ...mappedPolyTx]

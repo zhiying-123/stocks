@@ -20,6 +20,8 @@ interface Transaction {
     currency: string;
     balanceAfter?: number;
     description?: string;
+    category?: string;
+    outcome?: string;
     date: string;
 }
 
@@ -491,8 +493,8 @@ export default function WalletUI({
                         <button
                             onClick={() => setTransactionFilter('ALL')}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${transactionFilter === 'ALL'
-                                    ? 'bg-gray-100 text-gray-900 border border-gray-300'
-                                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
+                                ? 'bg-gray-100 text-gray-900 border border-gray-300'
+                                : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
                                 }`}
                         >
                             All Transactions
@@ -500,8 +502,8 @@ export default function WalletUI({
                         <button
                             onClick={() => setTransactionFilter('WALLET')}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${transactionFilter === 'WALLET'
-                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
                                 }`}
                         >
                             💰 Wallet
@@ -509,8 +511,8 @@ export default function WalletUI({
                         <button
                             onClick={() => setTransactionFilter('STOCKS')}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${transactionFilter === 'STOCKS'
-                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
                                 }`}
                         >
                             📈 Stocks
@@ -518,8 +520,8 @@ export default function WalletUI({
                         <button
                             onClick={() => setTransactionFilter('POLYMARKET')}
                             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${transactionFilter === 'POLYMARKET'
-                                    ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                                    : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
+                                ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                                : 'bg-white text-gray-500 hover:bg-gray-50 border border-gray-200'
                                 }`}
                         >
                             🎲 Polymarket
@@ -601,13 +603,13 @@ export default function WalletUI({
                                     textColor = 'text-purple-600';
                                     amountColor = 'text-red-600';
                                     amountSign = '-';
-                                    label = 'Polymarket';
+                                    label = tx.category || 'Polymarket';
                                 } else if (isPolymarketSell) {
                                     bgColor = 'bg-purple-50';
                                     textColor = 'text-purple-600';
                                     amountColor = 'text-emerald-600';
                                     amountSign = '+';
-                                    label = 'Polymarket';
+                                    label = tx.category || 'Polymarket';
                                 } else {
                                     bgColor = 'bg-gray-50';
                                     textColor = 'text-gray-600';
@@ -637,12 +639,19 @@ export default function WalletUI({
                                         <div className="flex-1 min-w-0">
                                             <p className="text-sm font-semibold text-gray-900">{label}</p>
                                             <p className="text-xs text-gray-400">
-                                                {tx.description || new Date(tx.date).toLocaleString('en-US', {
-                                                    month: 'short',
-                                                    day: 'numeric',
-                                                    hour: '2-digit',
-                                                    minute: '2-digit'
-                                                })}
+                                                {(() => {
+                                                    // For Polymarket transactions, show outcome and quantity
+                                                    if ((isPolymarketBuy || isPolymarketSell) && tx.outcome) {
+                                                        return `${tx.outcome} · ${tx.quantity} shares`;
+                                                    }
+                                                    // For other transactions, show description or date
+                                                    return tx.description || new Date(tx.date).toLocaleString('en-US', {
+                                                        month: 'short',
+                                                        day: 'numeric',
+                                                        hour: '2-digit',
+                                                        minute: '2-digit'
+                                                    });
+                                                })()}
                                             </p>
                                         </div>
                                         <div className="text-right">

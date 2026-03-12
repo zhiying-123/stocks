@@ -10,6 +10,7 @@ interface Holding {
     outcome: string;
     quantity: number;
     avg_price: number;
+    category?: string;
     marketQuestion: string;
     currentPrice: number;
 }
@@ -86,6 +87,7 @@ export default function MyPositionsUI({ holdings, currency }: { holdings: Holdin
                     outcome: selectedHolding.outcome,
                     quantity: qty,
                     pricePerShare: selectedHolding.currentPrice,
+                    category: selectedHolding.category,
                 }),
             });
 
@@ -209,6 +211,12 @@ export default function MyPositionsUI({ holdings, currency }: { holdings: Holdin
                                 {/* Desktop View */}
                                 <div className="hidden md:grid grid-cols-12 gap-4 items-center">
                                     <div className="col-span-3">
+                                        {h.category && (
+                                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-purple-600 mb-1">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-purple-600"></span>
+                                                {h.category}
+                                            </span>
+                                        )}
                                         <p className="text-sm font-semibold text-gray-900 line-clamp-2 leading-tight">{h.marketQuestion}</p>
                                     </div>
                                     <div className="col-span-1 text-center">
@@ -261,6 +269,12 @@ export default function MyPositionsUI({ holdings, currency }: { holdings: Holdin
                                 {/* Mobile View */}
                                 <div className="md:hidden space-y-3">
                                     <div>
+                                        {h.category && (
+                                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-purple-600 mb-1">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-purple-600"></span>
+                                                {h.category}
+                                            </span>
+                                        )}
                                         <p className="text-sm font-semibold text-gray-900 mb-2">{h.marketQuestion}</p>
                                         <span className={`inline-flex px-2.5 py-1 text-xs font-bold rounded-full ${h.outcome === 'YES'
                                             ? 'bg-emerald-50 text-emerald-700'

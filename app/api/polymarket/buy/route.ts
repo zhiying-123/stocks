@@ -23,9 +23,9 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { marketId, outcome, quantity, pricePerShare } = body;
+        const { marketId, outcome, quantity, pricePerShare, category } = body;
 
-        console.log("[BUY POLYMARKET] Request body:", JSON.stringify({ marketId, outcome, quantity, pricePerShare }));
+        console.log("[BUY POLYMARKET] Request body:", JSON.stringify({ marketId, outcome, quantity, pricePerShare, category }));
 
         // Validate input
         if (!marketId || !outcome || !quantity || pricePerShare == null) {
@@ -118,6 +118,7 @@ export async function POST(request: NextRequest) {
                     data: {
                         quantity: totalShares,
                         avg_price: newAvgPrice,
+                        category: category || existingHolding.category,
                         updated_at: new Date(),
                     },
                 });
@@ -130,6 +131,7 @@ export async function POST(request: NextRequest) {
                         outcome: outcome,
                         quantity: quantity,
                         avg_price: pricePerShare,
+                        category: category || null,
                     },
                 });
             }
@@ -145,21 +147,7 @@ export async function POST(request: NextRequest) {
                     price: pricePerShare,
                     total_amount: totalCostUSD,
                     currency: currency,
-                },
-            });
-
-            // 4. Record wallet transaction for tracking money flow
-            await tx.walletTransaction.create({
-                data: {
-                    u_id: user.id,
-                    transaction_type: "POLYMARKET_BUY",
-                    amount: totalCostInWalletCurrency,
-                    currency: currency,
-                    symbol: marketId,
-                    quantity: Math.round(quantity),
-                    price: pricePerShare,
-                    description: `Bought ${quantity} ${outcome} shares`,
-                    balance_after: updatedWallet.balance,
+                    category: category || null,
                 },
             });
 
