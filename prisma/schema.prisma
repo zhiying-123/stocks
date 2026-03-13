@@ -138,3 +138,16 @@ model PolymarketWatchlist {
   @@unique([u_id, market_id])
   @@index([u_id])
 }
+
+model PolymarketComment {
+  comment_id Int      @id @default(autoincrement())
+  u_id       Int
+  market_id  String
+  user_name  String
+  content    String
+  sentiment  String? // "bullish" | "bearish" | "neutral"
+  created_at DateTime @default(now())
+
+  @@index([market_id])
+  @@index([u_id])
+}

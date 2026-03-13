@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import SocialPanel from './SocialPanel';
 
 type TimeRange = '1D' | '1W' | '1M' | 'ALL';
 
@@ -28,12 +29,16 @@ interface MarketDetailUIProps {
     tokenId: string;
     currency: string;
     isInWatchlist: boolean;
+    userId?: number | null;
+    userName?: string | null;
 }
 
-export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatchlist: initialIsInWatchlist }: MarketDetailUIProps) {
+export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatchlist: initialIsInWatchlist, userId, userName }: MarketDetailUIProps) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const outcomeParam = searchParams?.get('outcome');
+    const qtyParam = searchParams?.get('qty');
+    const initialQuantity = qtyParam && !isNaN(parseFloat(qtyParam)) && parseFloat(qtyParam) > 0 ? qtyParam : '10';
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -46,7 +51,7 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
     const [selectedOutcome, setSelectedOutcome] = useState<'YES' | 'NO'>(
         outcomeParam === 'NO' ? 'NO' : 'YES'
     );
-    const [quantity, setQuantity] = useState('10');
+    const [quantity, setQuantity] = useState(initialQuantity);
     const [processing, setProcessing] = useState(false);
     const [tradeError, setTradeError] = useState('');
     const [tradeSuccess, setTradeSuccess] = useState('');
@@ -573,6 +578,13 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                 <div className="mt-3 text-xs text-red-500">{error}</div>
                             )}
                         </div>
+
+                        <SocialPanel
+                            marketId={tokenId}
+                            question={marketInfo.question}
+                            currentUserId={userId ?? undefined}
+                            currentUserName={userName ?? undefined}
+                        />
                     </div>
 
                     {/* Right Side: Trade Panel */}

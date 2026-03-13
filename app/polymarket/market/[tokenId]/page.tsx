@@ -126,5 +126,14 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ t
         isInWatchlist = !!watchlistItem;
     }
 
-    return <MarketDetailUI marketInfo={marketInfo} tokenId={tokenId} currency={currency} isInWatchlist={isInWatchlist} />;
+    return (
+        <MarketDetailUI
+            marketInfo={marketInfo}
+            tokenId={tokenId}
+            currency={currency}
+            isInWatchlist={isInWatchlist}
+            userId={user?.id ?? null}
+            userName={user?.name ?? null}
+        />
+    );
 }

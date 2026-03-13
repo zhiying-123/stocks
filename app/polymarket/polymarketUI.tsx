@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface Market {
@@ -42,6 +42,34 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
     const [watchlist, setWatchlist] = useState<string[]>(initialWatchlist);
     const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
     const [togglingWatchlist, setTogglingWatchlist] = useState<Set<string>>(new Set());
+
+    // Sorting state
+    const [sortBy, setSortBy] = useState('default');
+
+    // Advanced filters state
+    const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+    const [probabilityRange, setProbabilityRange] = useState<[number, number]>([0, 100]);
+    const [volumeMin, setVolumeMin] = useState<number>(0);
+    const [endDateFilter, setEndDateFilter] = useState<'all' | '7days' | '30days' | '90days'>('all');
+
+    // Ref for dropdown
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setShowAdvancedFilters(false);
+            }
+        }
+
+        if (showAdvancedFilters) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => {
+                document.removeEventListener('mousedown', handleClickOutside);
+            };
+        }
+    }, [showAdvancedFilters]);
 
     // Toggle watchlist
     const toggleWatchlist = async (marketId: string, e?: React.MouseEvent) => {
@@ -140,15 +168,70 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
         return 'text-red-600';
     };
 
-    // Filter markets
+    // Filter and sort markets
     const filteredMarkets = markets.filter(market => {
+        // Category filter
         if (selectedCategory !== 'All' && market.category !== selectedCategory) return false;
+
+        // Search filter
         if (searchTerm && !market.question.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+
+        // Watchlist filter
         if (showWatchlistOnly) {
             if (!market.conditionId) return false;
             if (!watchlist.includes(market.conditionId)) return false;
         }
+
+        // Probability range filter
+        const yesPrice = market.outcomes?.find(o => o.name === 'YES')?.price || 0.5;
+        const probability = yesPrice * 100;
+        if (probability < probabilityRange[0] || probability > probabilityRange[1]) return false;
+
+        // Volume filter
+        if ((market.volume || 0) < volumeMin) return false;
+
+        // End date filter
+        if (endDateFilter !== 'all' && market.end_date_iso) {
+            const endDate = new Date(market.end_date_iso);
+            const now = new Date();
+            const daysDiff = (endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+
+            if (endDateFilter === '7days' && daysDiff > 7) return false;
+            if (endDateFilter === '30days' && daysDiff > 30) return false;
+            if (endDateFilter === '90days' && daysDiff > 90) return false;
+        }
+
         return true;
+    }).sort((a, b) => {
+        // Apply sorting
+        switch (sortBy) {
+            case 'volume-high':
+                return (b.volume || 0) - (a.volume || 0);
+            case 'volume-low':
+                return (a.volume || 0) - (b.volume || 0);
+            case 'liquidity-high':
+                return (b.liquidity || 0) - (a.liquidity || 0);
+            case 'liquidity-low':
+                return (a.liquidity || 0) - (b.liquidity || 0);
+            case 'end-date-soon':
+                if (!a.end_date_iso) return 1;
+                if (!b.end_date_iso) return -1;
+                return new Date(a.end_date_iso).getTime() - new Date(b.end_date_iso).getTime();
+            case 'end-date-late':
+                if (!a.end_date_iso) return 1;
+                if (!b.end_date_iso) return -1;
+                return new Date(b.end_date_iso).getTime() - new Date(a.end_date_iso).getTime();
+            case 'probability-high':
+                const aProbability = (a.outcomes?.find(o => o.name === 'YES')?.price || 0.5) * 100;
+                const bProbability = (b.outcomes?.find(o => o.name === 'YES')?.price || 0.5) * 100;
+                return bProbability - aProbability;
+            case 'probability-low':
+                const aProbabilityLow = (a.outcomes?.find(o => o.name === 'YES')?.price || 0.5) * 100;
+                const bProbabilityLow = (b.outcomes?.find(o => o.name === 'YES')?.price || 0.5) * 100;
+                return aProbabilityLow - bProbabilityLow;
+            default:
+                return 0; // Default order
+        }
     });
 
     const currentFeatured = featuredMarkets[featuredIndex];
@@ -179,13 +262,13 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                             if (marketId) toggleWatchlist(marketId, e);
                                         }}
                                         disabled={!currentFeatured.conditionId || togglingWatchlist.has(currentFeatured.conditionId || '')}
-                                        className="absolute top-4 right-4 w-9 h-9 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all z-10"
+                                        className="absolute top-4 right-4 w-9 h-9 rounded-2xl flex items-center justify-center hover:bg-gray-100 transition-all z-10"
                                         title={currentFeatured.conditionId && watchlist.includes(currentFeatured.conditionId) ? "Remove from favorites" : "Add to favorites"}
                                     >
                                         <svg
                                             className={`w-5 h-5 transition-all ${currentFeatured.conditionId && watchlist.includes(currentFeatured.conditionId)
-                                                    ? 'text-yellow-500 fill-yellow-500'
-                                                    : 'text-gray-300 hover:text-yellow-500'
+                                                ? 'text-yellow-500 fill-yellow-500'
+                                                : 'text-gray-300 hover:text-yellow-500'
                                                 } ${currentFeatured.conditionId && togglingWatchlist.has(currentFeatured.conditionId) ? 'opacity-50' : ''
                                                 }`}
                                             fill={currentFeatured.conditionId && watchlist.includes(currentFeatured.conditionId) ? "currentColor" : "none"}
@@ -279,13 +362,13 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                             <div className="flex gap-3">
                                                 <button
                                                     onClick={() => goToMarket(currentFeatured, 'YES')}
-                                                    className="flex-1 px-4 py-3 bg-green-50 hover:bg-green-100 text-green-700 font-semibold text-sm rounded-lg transition-all border border-green-200"
+                                                    className="flex-1 px-4 py-3 bg-green-50 hover:bg-green-100 text-green-700 font-semibold text-sm rounded-2xl transition-all border border-green-200"
                                                 >
                                                     Buy Yes · {((currentFeatured.outcomes?.[0]?.price || 0.5) * 100).toFixed(0)}¢
                                                 </button>
                                                 <button
                                                     onClick={() => goToMarket(currentFeatured, 'NO')}
-                                                    className="flex-1 px-4 py-3 bg-red-50 hover:bg-red-100 text-red-700 font-semibold text-sm rounded-lg transition-all border border-red-200"
+                                                    className="flex-1 px-4 py-3 bg-red-50 hover:bg-red-100 text-red-700 font-semibold text-sm rounded-2xl transition-all border border-red-200"
                                                 >
                                                     Buy No · {((currentFeatured.outcomes?.[1]?.price || 0.5) * 100).toFixed(0)}¢
                                                 </button>
@@ -374,68 +457,247 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                     <h2 className="text-2xl font-bold text-gray-900 mb-4">All Markets</h2>
 
                     {/* Filters */}
-                    <div className="py-4 mb-6">
-                        <div className="flex flex-wrap gap-4 items-center">
-                            {/* Category Filters */}
-                            <div className="flex gap-2 flex-wrap flex-1">
-                                {categoryTabs.map((tab, idx) => {
-                                    const isSelected = selectedCategory === tab;
-                                    const colors = [
-                                        { selected: 'bg-blue-100 text-blue-700 hover:bg-blue-200', unselected: 'bg-blue-50 text-blue-600 hover:bg-blue-100' },
-                                        { selected: 'bg-purple-100 text-purple-700 hover:bg-purple-200', unselected: 'bg-purple-50 text-purple-600 hover:bg-purple-100' },
-                                        { selected: 'bg-green-100 text-green-700 hover:bg-green-200', unselected: 'bg-green-50 text-green-600 hover:bg-green-100' },
-                                        { selected: 'bg-orange-100 text-orange-700 hover:bg-orange-200', unselected: 'bg-orange-50 text-orange-600 hover:bg-orange-100' },
-                                        { selected: 'bg-pink-100 text-pink-700 hover:bg-pink-200', unselected: 'bg-pink-50 text-pink-600 hover:bg-pink-100' },
-                                        { selected: 'bg-cyan-100 text-cyan-700 hover:bg-cyan-200', unselected: 'bg-cyan-50 text-cyan-600 hover:bg-cyan-100' },
-                                        { selected: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200', unselected: 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' },
-                                    ];
-                                    const colorScheme = colors[idx % colors.length];
-                                    return (
-                                        <button
-                                            key={tab}
-                                            onClick={() => setSelectedCategory(tab)}
-                                            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${isSelected ? colorScheme.selected : colorScheme.unselected
-                                                }`}
-                                        >
-                                            {tab}
-                                        </button>
-                                    );
-                                })}
-                            </div>
+                    <div className="py-4 mb-6 space-y-4">
+                        {/* Category Filters - Top Row */}
+                        <div className="flex gap-2 flex-wrap">
+                            {categoryTabs.map((tab, idx) => {
+                                const isSelected = selectedCategory === tab;
+                                const palette = [
+                                    { sel: 'bg-gray-900 text-white border-gray-900', unsel: 'bg-white text-gray-600 border-gray-200 hover:border-gray-400 hover:bg-gray-50' },
+                                    { sel: 'bg-blue-100 text-blue-700 border-blue-300', unsel: 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600' },
+                                    { sel: 'bg-violet-100 text-violet-700 border-violet-300', unsel: 'bg-white text-gray-600 border-gray-200 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-600' },
+                                    { sel: 'bg-amber-100 text-amber-700 border-amber-300', unsel: 'bg-white text-gray-600 border-gray-200 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600' },
+                                    { sel: 'bg-emerald-100 text-emerald-700 border-emerald-300', unsel: 'bg-white text-gray-600 border-gray-200 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600' },
+                                    { sel: 'bg-rose-100 text-rose-700 border-rose-300', unsel: 'bg-white text-gray-600 border-gray-200 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600' },
+                                    { sel: 'bg-cyan-100 text-cyan-700 border-cyan-300', unsel: 'bg-white text-gray-600 border-gray-200 hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-600' },
+                                ];
+                                const scheme = palette[idx % palette.length];
+                                return (
+                                    <button
+                                        key={tab}
+                                        onClick={() => setSelectedCategory(tab)}
+                                        className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all border ${isSelected
+                                            ? `${scheme.sel} shadow-sm scale-105`
+                                            : scheme.unsel
+                                            }`}
+                                    >
+                                        {tab}
+                                    </button>
+                                );
+                            })}
+                        </div>
 
-                            {/* Watchlist Filter Button */}
-                            <button
-                                onClick={() => setShowWatchlistOnly(!showWatchlistOnly)}
-                                className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${showWatchlistOnly
-                                    ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
-                            >
-                                <svg className="w-4 h-4" fill={showWatchlistOnly ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                                </svg>
-                                {showWatchlistOnly ? 'Favorites' : 'All Markets'}
-                            </button>
-
+                        {/* Control Bar - Bottom Row */}
+                        <div className="flex flex-wrap gap-3 items-center">
                             {/* Search */}
-                            <div className="relative w-full sm:w-64">
+                            <div className="relative flex-1 min-w-50">
                                 <input
                                     type="text"
                                     placeholder="Search markets..."
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="w-full pl-10 pr-4 py-2 rounded-full border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-300 bg-white hover:border-gray-300 transition-all"
+                                    className="w-full pl-11 pr-4 py-2.5 rounded-2xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent bg-white hover:border-gray-300 transition-all"
                                 />
-                                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                                 </svg>
                             </div>
-                        </div>
 
-                        {/* Results count */}
-                        <div className="mt-3 text-sm text-gray-500">
-                            {filteredMarkets.length} markets
-                            {showWatchlistOnly && ` (${watchlist.length} favorites)`}
+                            {/* Sort By - Custom Dropdown */}
+                            <div className="relative" ref={dropdownRef}>
+                                <button
+                                    onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                                    className={`px-4 py-2.5 rounded-2xl text-sm font-semibold transition-all flex items-center gap-2 border ${showAdvancedFilters || sortBy !== 'default' || probabilityRange[0] > 0 || probabilityRange[1] < 100 || volumeMin > 0 || endDateFilter !== 'all'
+                                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50 hover:border-gray-300'
+                                        }`}
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
+                                    </svg>
+                                    {sortBy === 'default' ? 'Sort' : sortBy.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                                    <svg className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </button>
+
+                                {/* Dropdown Menu */}
+                                {showAdvancedFilters && (
+                                    <div className="absolute top-full mt-2 right-0 w-80 bg-white rounded-2xl border border-gray-200 shadow-2xl z-50 animate-fadeIn overflow-hidden">
+                                        <div className="p-3">
+                                            {/* Sort Options */}
+                                            <div className="mb-3">
+                                                <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-2 px-2">Sort By</div>
+                                                <div className="space-y-0.5">
+                                                    {[
+                                                        { value: 'default', label: 'Default Order', icon: '⚡', active: 'bg-gray-100 text-gray-800' },
+                                                        { value: 'volume-high', label: 'Volume: High to Low', icon: '📈', active: 'bg-blue-100 text-blue-700' },
+                                                        { value: 'volume-low', label: 'Volume: Low to High', icon: '📉', active: 'bg-blue-100 text-blue-700' },
+                                                        { value: 'liquidity-high', label: 'Liquidity: High to Low', icon: '💰', active: 'bg-emerald-100 text-emerald-700' },
+                                                        { value: 'liquidity-low', label: 'Liquidity: Low to High', icon: '💸', active: 'bg-emerald-100 text-emerald-700' },
+                                                        { value: 'end-date-soon', label: 'Ending Soon', icon: '⏰', active: 'bg-amber-100 text-amber-700' },
+                                                        { value: 'end-date-late', label: 'Ending Later', icon: '📅', active: 'bg-amber-100 text-amber-700' },
+                                                        { value: 'probability-high', label: 'Probability: High → Low', icon: '🔥', active: 'bg-rose-100 text-rose-700' },
+                                                        { value: 'probability-low', label: 'Probability: Low → High', icon: '❄️', active: 'bg-cyan-100 text-cyan-700' },
+                                                    ].map((option) => (
+                                                        <button
+                                                            key={option.value}
+                                                            onClick={() => setSortBy(option.value)}
+                                                            className={`w-full px-3 py-2 rounded-xl text-left text-sm font-medium transition-all flex items-center gap-3 ${sortBy === option.value
+                                                                ? option.active
+                                                                : 'text-gray-600 hover:bg-gray-50'
+                                                                }`}
+                                                        >
+                                                            <span className="text-base w-5 text-center">{option.icon}</span>
+                                                            <span className="flex-1">{option.label}</span>
+                                                            {sortBy === option.value && (
+                                                                <svg className="w-3.5 h-3.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                                </svg>
+                                                            )}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Advanced Filters */}
+                                            <div className="border-t border-gray-100 pt-3 space-y-4">
+                                                <div className="text-xs font-bold text-violet-400 uppercase tracking-wider mb-2 px-2">Filters</div>
+
+                                                {/* Probability Range */}
+                                                <div className="px-2 py-2.5 rounded-xl bg-violet-50">
+                                                    <label className="block text-xs font-bold text-violet-700 mb-2">
+                                                        🎯 Probability: <span className="text-violet-900">{probabilityRange[0]}% – {probabilityRange[1]}%</span>
+                                                    </label>
+                                                    <div className="space-y-1.5">
+                                                        <input
+                                                            type="range"
+                                                            min="0"
+                                                            max="100"
+                                                            value={probabilityRange[0]}
+                                                            onChange={(e) => setProbabilityRange([parseInt(e.target.value), probabilityRange[1]])}
+                                                            className="w-full accent-violet-500"
+                                                        />
+                                                        <input
+                                                            type="range"
+                                                            min="0"
+                                                            max="100"
+                                                            value={probabilityRange[1]}
+                                                            onChange={(e) => setProbabilityRange([probabilityRange[0], parseInt(e.target.value)])}
+                                                            className="w-full accent-violet-500"
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                {/* Minimum Volume */}
+                                                <div className="px-2">
+                                                    <label className="block text-xs font-bold text-blue-600 mb-2">
+                                                        📊 Min Volume
+                                                    </label>
+                                                    <div className="flex gap-1.5">
+                                                        {[
+                                                            { value: 0, label: 'All', sel: 'bg-gray-200 text-gray-700' },
+                                                            { value: 1000, label: '$1K+', sel: 'bg-blue-100 text-blue-700' },
+                                                            { value: 10000, label: '$10K+', sel: 'bg-cyan-100 text-cyan-700' },
+                                                            { value: 100000, label: '$100K+', sel: 'bg-teal-100 text-teal-700' },
+                                                        ].map((opt) => (
+                                                            <button
+                                                                key={opt.value}
+                                                                onClick={() => setVolumeMin(opt.value)}
+                                                                className={`flex-1 px-2 py-1.5 rounded-xl text-xs font-semibold transition-all ${volumeMin === opt.value
+                                                                    ? opt.sel
+                                                                    : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                                                                    }`}
+                                                            >
+                                                                {opt.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                {/* End Date Filter */}
+                                                <div className="px-2">
+                                                    <label className="block text-xs font-bold text-amber-600 mb-2">
+                                                        📅 Ends Within
+                                                    </label>
+                                                    <div className="grid grid-cols-2 gap-1.5">
+                                                        <button
+                                                            onClick={() => setEndDateFilter('all')}
+                                                            className={`px-2 py-1.5 rounded-xl text-xs font-semibold transition-all ${endDateFilter === 'all'
+                                                                ? 'bg-gray-200 text-gray-700'
+                                                                : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+                                                                }`}
+                                                        >
+                                                            Any Time
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setEndDateFilter('7days')}
+                                                            className={`px-2 py-1.5 rounded-xl text-xs font-semibold transition-all ${endDateFilter === '7days'
+                                                                ? 'bg-rose-100 text-rose-700'
+                                                                : 'bg-gray-50 text-gray-500 hover:bg-rose-50 hover:text-rose-600'
+                                                                }`}
+                                                        >
+                                                            7 Days
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setEndDateFilter('30days')}
+                                                            className={`px-2 py-1.5 rounded-xl text-xs font-semibold transition-all ${endDateFilter === '30days'
+                                                                ? 'bg-amber-100 text-amber-700'
+                                                                : 'bg-gray-50 text-gray-500 hover:bg-amber-50 hover:text-amber-600'
+                                                                }`}
+                                                        >
+                                                            30 Days
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setEndDateFilter('90days')}
+                                                            className={`px-2 py-1.5 rounded-xl text-xs font-semibold transition-all ${endDateFilter === '90days'
+                                                                ? 'bg-emerald-100 text-emerald-700'
+                                                                : 'bg-gray-50 text-gray-500 hover:bg-emerald-50 hover:text-emerald-600'
+                                                                }`}
+                                                        >
+                                                            90 Days
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                {/* Reset Button */}
+                                                <div className="px-2 pt-1 pb-1">
+                                                    <button
+                                                        onClick={() => {
+                                                            setProbabilityRange([0, 100]);
+                                                            setVolumeMin(0);
+                                                            setEndDateFilter('all');
+                                                            setSortBy('default');
+                                                        }}
+                                                        className="w-full px-3 py-2 bg-gray-900 hover:bg-gray-700 text-white font-semibold text-xs rounded-full transition-all"
+                                                    >
+                                                        Reset All Filters
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Watchlist Toggle */}
+                            <button
+                                onClick={() => setShowWatchlistOnly(!showWatchlistOnly)}
+                                className={`px-4 py-2.5 rounded-2xl text-sm font-semibold transition-all flex items-center gap-2 ${showWatchlistOnly
+                                    ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
+                                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-200 hover:border-gray-300'
+                                    }`}
+                            >
+                                <svg className="w-4 h-4" fill={showWatchlistOnly ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                                </svg>
+                                {showWatchlistOnly ? `Favorites (${watchlist.length})` : 'Favorites'}
+                            </button>
+
+                            {/* Results count */}
+                            <div className="text-sm font-medium text-gray-500">
+                                {filteredMarkets.length} {filteredMarkets.length === 1 ? 'market' : 'markets'}
+                            </div>
                         </div>
                     </div>
 
@@ -465,13 +727,13 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                 return (
                                     <div
                                         key={market.id}
-                                        className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md hover:border-gray-300 transition-all group relative"
+                                        className="bg-white rounded-3xl border border-gray-200 p-4 hover:shadow-md hover:border-gray-300 transition-all group relative"
                                     >
                                         {/* Watchlist Button - Top Right */}
                                         <button
                                             onClick={(e) => marketId && toggleWatchlist(marketId, e)}
                                             disabled={isToggling || !marketId}
-                                            className="absolute top-3 right-3 w-8 h-8 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all z-10"
+                                            className="absolute top-3 right-3 w-8 h-8 rounded-2xl flex items-center justify-center hover:bg-gray-100 transition-all z-10"
                                             title={inWatchlist ? "Remove from favorites" : "Add to favorites"}
                                         >
                                             <svg
@@ -501,11 +763,11 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                                         <img
                                                             src={market.image}
                                                             alt=""
-                                                            className="w-8 h-8 rounded-lg object-cover"
+                                                            className="w-8 h-8 rounded-xl object-cover"
                                                             onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
                                                         />
                                                     ) : (
-                                                        <div className="w-8 h-8 rounded-lg bg-linear-to-br from-blue-200 to-purple-200" />
+                                                        <div className="w-8 h-8 rounded-xl bg-linear-to-br from-blue-200 to-purple-200" />
                                                     )}
                                                     <span className="text-xs text-gray-500">{market.category}</span>
                                                 </div>
@@ -530,7 +792,7 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                                     e.stopPropagation();
                                                     goToMarket(market, 'YES');
                                                 }}
-                                                className="px-3 py-2 bg-green-50 hover:bg-green-500 text-green-700 hover:text-white font-semibold text-sm rounded-lg transition-all border border-green-200 hover:border-green-500"
+                                                className="px-3 py-2 bg-green-50 hover:bg-green-500 text-green-700 hover:text-white font-semibold text-sm rounded-2xl transition-all border border-green-200 hover:border-green-500"
                                             >
                                                 Yes
                                             </button>
@@ -539,7 +801,7 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                                     e.stopPropagation();
                                                     goToMarket(market, 'NO');
                                                 }}
-                                                className="px-3 py-2 bg-red-50 hover:bg-red-500 text-red-700 hover:text-white font-semibold text-sm rounded-lg transition-all border border-red-200 hover:border-red-500"
+                                                className="px-3 py-2 bg-red-50 hover:bg-red-500 text-red-700 hover:text-white font-semibold text-sm rounded-2xl transition-all border border-red-200 hover:border-red-500"
                                             >
                                                 No
                                             </button>
