@@ -245,6 +245,12 @@ export default function MyPositionsUI({ holdings, currency }: { holdings: Holdin
                                         </p>
                                     </div>
                                     <div className="col-span-3 flex gap-2 justify-end">
+                                        <Link
+                                            href={`/polymarket/market/${encodeURIComponent(h.market_id)}?outcome=${h.outcome === 'NO' ? 'NO' : 'YES'}`}
+                                            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg transition-colors border border-blue-200"
+                                        >
+                                            Set Alert
+                                        </Link>
                                         <button
                                             onClick={() => openModal('BUY', h)}
                                             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1"
@@ -304,6 +310,12 @@ export default function MyPositionsUI({ holdings, currency }: { holdings: Holdin
                                         </div>
                                     </div>
                                     <div className="flex gap-2">
+                                        <Link
+                                            href={`/polymarket/market/${encodeURIComponent(h.market_id)}?outcome=${h.outcome === 'NO' ? 'NO' : 'YES'}`}
+                                            className="flex-1 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-semibold rounded-lg transition-colors border border-blue-200 text-center"
+                                        >
+                                            Set Alert
+                                        </Link>
                                         <button
                                             onClick={() => openModal('BUY', h)}
                                             className="flex-1 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-sm font-semibold rounded-lg transition-colors border border-emerald-200"

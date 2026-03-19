@@ -151,3 +151,22 @@ model PolymarketComment {
   @@index([market_id])
   @@index([u_id])
 }
+
+model PolymarketPriceAlert {
+  alert_id     Int       @id @default(autoincrement())
+  u_id         Int
+  market_id    String
+  outcome      String    @default("YES") // "YES" or "NO"
+  direction    String // "ABOVE" or "BELOW"
+  target_price Float // Stored in USD probability form (0.00 - 1.00)
+  source       String // "WATCHLIST" or "HOLDING"
+  is_active    Boolean   @default(true)
+  triggered_at DateTime?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  @@index([u_id])
+  @@index([market_id])
+  @@index([is_active])
+  @@index([created_at])
+}

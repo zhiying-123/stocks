@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import SocialPanel from './SocialPanel';
+import CustomSelect from '@/app/components/CustomSelect';
 
 type TimeRange = '1D' | '1W' | '1M' | 'ALL';
 
@@ -33,6 +34,25 @@ interface MarketDetailUIProps {
     userName?: string | null;
 }
 
+type AlertItem = {
+    alert_id: number;
+    outcome: 'YES' | 'NO';
+    direction: 'ABOVE' | 'BELOW';
+    notify_channels_list?: Array<'EMAIL' | 'DISCORD'>;
+    target_price: number;
+    target_price_percent: number;
+    source: string;
+    is_active: boolean;
+};
+
+type NotifyMode = 'BOTH' | 'EMAIL' | 'DISCORD';
+
+function modeToChannels(mode: NotifyMode): Array<'EMAIL' | 'DISCORD'> {
+    if (mode === 'EMAIL') return ['EMAIL'];
+    if (mode === 'DISCORD') return ['DISCORD'];
+    return ['EMAIL', 'DISCORD'];
+}
+
 export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatchlist: initialIsInWatchlist, userId, userName }: MarketDetailUIProps) {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -56,6 +76,15 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
     const [tradeError, setTradeError] = useState('');
     const [tradeSuccess, setTradeSuccess] = useState('');
     const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [alerts, setAlerts] = useState<AlertItem[]>([]);
+    const [alertsLoading, setAlertsLoading] = useState(false);
+    const [alertOutcome, setAlertOutcome] = useState<'YES' | 'NO'>(outcomeParam === 'NO' ? 'NO' : 'YES');
+    const [alertDirection, setAlertDirection] = useState<'ABOVE' | 'BELOW'>('ABOVE');
+    const [alertNotifyMode, setAlertNotifyMode] = useState<NotifyMode>('BOTH');
+    const [alertTarget, setAlertTarget] = useState('');
+    const [alertSubmitting, setAlertSubmitting] = useState(false);
+    const [alertMessage, setAlertMessage] = useState('');
+    const [alertError, setAlertError] = useState('');
 
     // Fetch price history
     useEffect(() => {
@@ -253,6 +282,38 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
         return (marketInfo.yesPrice * 100).toFixed(0);
     }, [marketInfo]);
 
+    useEffect(() => {
+        const fallback = alertOutcome === 'YES' ? marketInfo.yesPrice : marketInfo.noPrice;
+        if (!fallback) return;
+
+        if (!alertTarget) {
+            setAlertTarget((fallback * 100).toFixed(2));
+        }
+    }, [alertOutcome, marketInfo.noPrice, marketInfo.yesPrice, alertTarget]);
+
+    async function loadAlerts() {
+        setAlertsLoading(true);
+        try {
+            const res = await fetch(`/api/polymarket/alerts?marketId=${encodeURIComponent(tokenId)}`, {
+                cache: 'no-store',
+            });
+            if (!res.ok) {
+                throw new Error('Failed to fetch alerts');
+            }
+            const data = await res.json();
+            setAlerts(Array.isArray(data.alerts) ? data.alerts : []);
+        } catch (err) {
+            console.error('Failed to load alerts:', err);
+        } finally {
+            setAlertsLoading(false);
+        }
+    }
+
+    useEffect(() => {
+        loadAlerts();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tokenId]);
+
     // Toggle watchlist
     const toggleWatchlist = async () => {
         if (togglingWatchlist) return;
@@ -268,6 +329,7 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
 
                 if (res.ok) {
                     setIsInWatchlist(false);
+                    setAlertMessage('');
                 }
             } else {
                 // Add to watchlist
@@ -279,6 +341,7 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
 
                 if (res.ok) {
                     setIsInWatchlist(true);
+                    setAlertError('');
                 }
             }
         } catch (error) {
@@ -287,6 +350,65 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
             setTogglingWatchlist(false);
         }
     };
+
+    async function createAlert() {
+        setAlertSubmitting(true);
+        setAlertError('');
+        setAlertMessage('');
+
+        try {
+            const res = await fetch('/api/polymarket/alerts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    marketId: tokenId,
+                    outcome: alertOutcome,
+                    direction: alertDirection,
+                    notifyChannels: modeToChannels(alertNotifyMode),
+                    targetPrice: Number(alertTarget),
+                }),
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+                setAlertError(data.error || 'Failed to create alert');
+                return;
+            }
+
+            setAlertMessage('Alert created successfully');
+            setAlertTarget('');
+            await loadAlerts();
+        } catch (err) {
+            console.error('Failed to create alert:', err);
+            setAlertError('Failed to create alert');
+        } finally {
+            setAlertSubmitting(false);
+        }
+    }
+
+    async function deleteAlert(alertId: number) {
+        try {
+            const res = await fetch(`/api/polymarket/alerts?alertId=${alertId}`, {
+                method: 'DELETE',
+            });
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => null);
+                setAlertError(data?.error || 'Failed to delete alert');
+                return;
+            }
+
+            setAlerts((prev) => prev.filter((alert) => alert.alert_id !== alertId));
+        } catch (err) {
+            console.error('Failed to delete alert:', err);
+            setAlertError('Failed to delete alert');
+        }
+    }
+
+    function focusAlertTable() {
+        const section = document.getElementById('price-alerts');
+        section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 
     // Handle trade submission
     async function handleTrade() {
@@ -592,29 +714,40 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                         <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm sticky top-6">
                             <div className="flex items-center justify-between mb-4">
                                 <h2 className="text-lg font-bold text-gray-900">Trade</h2>
-                                <button
-                                    onClick={toggleWatchlist}
-                                    disabled={togglingWatchlist}
-                                    className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all"
-                                    title={isInWatchlist ? "Remove from favorites" : "Add to favorites"}
-                                >
-                                    <svg
-                                        className={`w-5 h-5 transition-all ${isInWatchlist
-                                            ? 'text-yellow-500 fill-yellow-500'
-                                            : 'text-gray-300 hover:text-yellow-500'
-                                            } ${togglingWatchlist ? 'opacity-50' : ''}`}
-                                        fill={isInWatchlist ? "currentColor" : "none"}
-                                        stroke="currentColor"
-                                        viewBox="0 0 24 24"
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        onClick={focusAlertTable}
+                                        className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all"
+                                        title="Set alert"
                                     >
-                                        <path
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            strokeWidth={2}
-                                            d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
-                                        />
-                                    </svg>
-                                </button>
+                                        <svg className="w-5 h-5 text-gray-400 hover:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V4a2 2 0 10-4 0v1.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        onClick={toggleWatchlist}
+                                        disabled={togglingWatchlist}
+                                        className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-gray-100 transition-all"
+                                        title={isInWatchlist ? "Remove from favorites" : "Add to favorites"}
+                                    >
+                                        <svg
+                                            className={`w-5 h-5 transition-all ${isInWatchlist
+                                                ? 'text-yellow-500 fill-yellow-500'
+                                                : 'text-gray-300 hover:text-yellow-500'
+                                                } ${togglingWatchlist ? 'opacity-50' : ''}`}
+                                            fill={isInWatchlist ? "currentColor" : "none"}
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                        >
+                                            <path
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                strokeWidth={2}
+                                                d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
 
                             {/* Outcome Selection */}
@@ -723,6 +856,127 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                             >
                                 {processing ? 'Processing...' : `Buy ${selectedOutcome}`}
                             </button>
+
+                            <div id="price-alerts" className="mt-6 pt-5 border-t border-gray-200 scroll-mt-24">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="text-sm font-bold text-gray-900">Price Alerts</h3>
+                                </div>
+
+                                <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-2 space-y-2.5">
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <label className="block">
+                                            <span className="block text-[11px] font-semibold text-gray-600 mb-1">Outcome</span>
+                                            <CustomSelect
+                                                value={alertOutcome}
+                                                onChange={(nextValue) => setAlertOutcome(nextValue)}
+                                                disabled={alertSubmitting}
+                                                options={[
+                                                    { value: 'YES', label: 'YES' },
+                                                    { value: 'NO', label: 'NO' },
+                                                ]}
+                                            />
+                                        </label>
+                                        <label className="block">
+                                            <span className="block text-[11px] font-semibold text-gray-600 mb-1">Direction</span>
+                                            <CustomSelect
+                                                value={alertDirection}
+                                                onChange={(nextValue) => setAlertDirection(nextValue)}
+                                                disabled={alertSubmitting}
+                                                options={[
+                                                    { value: 'ABOVE', label: 'ABOVE' },
+                                                    { value: 'BELOW', label: 'BELOW' },
+                                                ]}
+                                            />
+                                        </label>
+                                    </div>
+                                    <label className="block">
+                                        <span className="block text-[11px] font-semibold text-gray-600 mb-1">Notify Via</span>
+                                        <CustomSelect
+                                            value={alertNotifyMode}
+                                            onChange={(nextValue) => setAlertNotifyMode(nextValue as NotifyMode)}
+                                            disabled={alertSubmitting}
+                                            options={[
+                                                { value: 'BOTH', label: 'Email + Discord' },
+                                                { value: 'EMAIL', label: 'Email Only' },
+                                                { value: 'DISCORD', label: 'Discord Only' },
+                                            ]}
+                                        />
+                                    </label>
+                                    <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                                        <label className="block">
+                                            <span className="block text-[11px] font-semibold text-gray-600 mb-1">Target Price (%)</span>
+                                            <input
+                                                type="number"
+                                                min="0.01"
+                                                max="99.99"
+                                                step="0.01"
+                                                inputMode="decimal"
+                                                value={alertTarget}
+                                                onChange={(e) => setAlertTarget(e.target.value)}
+                                                disabled={alertSubmitting}
+                                                placeholder="e.g. 57.25"
+                                                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold text-gray-800 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                            />
+                                        </label>
+                                        <button
+                                            onClick={createAlert}
+                                            disabled={alertSubmitting}
+                                            className="h-10.5 px-4 bg-gray-900 hover:bg-black text-white text-sm font-semibold rounded-lg disabled:opacity-50"
+                                        >
+                                            {alertSubmitting ? 'Saving...' : 'Set Alert'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {alertError && (
+                                    <p className="text-xs text-red-600 mb-2">{alertError}</p>
+                                )}
+                                {alertMessage && (
+                                    <p className="text-xs text-emerald-600 mb-2">{alertMessage}</p>
+                                )}
+
+                                <div className="overflow-auto border border-gray-200 rounded-xl max-h-52 bg-white shadow-xs">
+                                    {alertsLoading ? (
+                                        <p className="text-xs text-gray-500 px-3 py-3">Loading alerts...</p>
+                                    ) : alerts.filter((alert) => alert.is_active).length === 0 ? (
+                                        <p className="text-xs text-gray-500 px-3 py-3">No active alerts for this market.</p>
+                                    ) : (
+                                        <table className="min-w-full text-xs">
+                                            <thead className="bg-gray-100 text-gray-700 sticky top-0 border-b border-gray-200">
+                                                <tr>
+                                                    <th className="text-left px-2.5 py-2 font-semibold">Outcome</th>
+                                                    <th className="text-left px-2.5 py-2 font-semibold">Direction</th>
+                                                    <th className="text-left px-2.5 py-2 font-semibold">Target</th>
+                                                    <th className="text-right px-2.5 py-2 font-semibold">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {alerts
+                                                    .filter((alert) => alert.is_active)
+                                                    .map((alert) => (
+                                                        <tr key={alert.alert_id} className="hover:bg-blue-50/40 transition-colors">
+                                                            <td className="px-2.5 py-2 text-gray-800 font-semibold">{alert.outcome}</td>
+                                                            <td className="px-2.5 py-2 text-gray-700">
+                                                                <span className="px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 text-gray-700">
+                                                                    {alert.direction}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-2.5 py-2 text-gray-800 font-medium">{alert.target_price_percent.toFixed(2)}%</td>
+                                                            <td className="px-2.5 py-2 text-right">
+                                                                <button
+                                                                    onClick={() => deleteAlert(alert.alert_id)}
+                                                                    className="px-2 py-1 rounded-md text-red-600 hover:text-red-700 hover:bg-red-50 font-medium transition-colors"
+                                                                >
+                                                                    Remove
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                            </tbody>
+                                        </table>
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

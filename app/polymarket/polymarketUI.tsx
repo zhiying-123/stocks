@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import CustomSelect from '@/app/components/CustomSelect';
 
 interface Market {
     id: string;
@@ -26,6 +27,15 @@ interface PolymarketUIProps {
     watchlist: string[];
 }
 
+type MarketAlert = {
+    alert_id: number;
+    outcome: 'YES' | 'NO';
+    direction: 'ABOVE' | 'BELOW';
+    notify_channels_list?: Array<'EMAIL' | 'DISCORD'>;
+    target_price_percent: number;
+    is_active: boolean;
+};
+
 // Helper to format volume
 function formatVolume(vol?: number): string {
     if (!vol) return '$0';
@@ -42,6 +52,17 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
     const [watchlist, setWatchlist] = useState<string[]>(initialWatchlist);
     const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
     const [togglingWatchlist, setTogglingWatchlist] = useState<Set<string>>(new Set());
+    const [showAlertModal, setShowAlertModal] = useState(false);
+    const [alertMarket, setAlertMarket] = useState<Market | null>(null);
+    const [alertRows, setAlertRows] = useState<MarketAlert[]>([]);
+    const [alertsLoading, setAlertsLoading] = useState(false);
+    const [alertOutcome, setAlertOutcome] = useState<'YES' | 'NO'>('YES');
+    const [alertDirection, setAlertDirection] = useState<'ABOVE' | 'BELOW'>('ABOVE');
+    const [alertNotifyChannels, setAlertNotifyChannels] = useState<Array<'EMAIL' | 'DISCORD'>>(['EMAIL', 'DISCORD']);
+    const [alertTarget, setAlertTarget] = useState('');
+    const [alertError, setAlertError] = useState('');
+    const [alertMessage, setAlertMessage] = useState('');
+    const [alertSubmitting, setAlertSubmitting] = useState(false);
 
     // Sorting state
     const [sortBy, setSortBy] = useState('default');
@@ -122,6 +143,115 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
         if (!market.conditionId) return;
         const url = `/polymarket/market/${encodeURIComponent(market.conditionId)}${outcome ? `?outcome=${outcome}` : ''}`;
         router.push(url);
+    };
+
+    const loadAlertsForMarket = async (marketId: string) => {
+        setAlertsLoading(true);
+        try {
+            const res = await fetch(`/api/polymarket/alerts?marketId=${encodeURIComponent(marketId)}`, {
+                cache: 'no-store',
+            });
+            if (!res.ok) throw new Error('Failed to load alerts');
+            const data = await res.json();
+            setAlertRows(Array.isArray(data.alerts) ? data.alerts : []);
+        } catch (error) {
+            console.error('Failed to load market alerts:', error);
+            setAlertError('Failed to load alerts');
+            setAlertRows([]);
+        } finally {
+            setAlertsLoading(false);
+        }
+    };
+
+    const openAlertModal = async (market: Market, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
+        if (!market.conditionId) return;
+
+        setAlertMarket(market);
+        setShowAlertModal(true);
+        setAlertError('');
+        setAlertMessage('');
+        setAlertOutcome('YES');
+        setAlertDirection('ABOVE');
+        setAlertNotifyChannels(['EMAIL', 'DISCORD']);
+        const yesPrice = market.outcomes?.find((o) => o.name === 'YES')?.price;
+        setAlertTarget(yesPrice ? (yesPrice * 100).toFixed(2) : '');
+        await loadAlertsForMarket(market.conditionId);
+    };
+
+    const toggleAlertNotifyChannel = (channel: 'EMAIL' | 'DISCORD') => {
+        setAlertNotifyChannels((prev) => {
+            if (prev.includes(channel)) {
+                return prev.filter((item) => item !== channel);
+            }
+            return [...prev, channel];
+        });
+    };
+
+    const createAlertForMarket = async () => {
+        if (!alertMarket?.conditionId) return;
+
+        setAlertError('');
+        setAlertMessage('');
+        const targetValue = Number(alertTarget);
+
+        if (!Number.isFinite(targetValue) || targetValue <= 0 || targetValue >= 100) {
+            setAlertError('Target % must be between 0 and 100');
+            return;
+        }
+
+        if (alertNotifyChannels.length === 0) {
+            setAlertError('Please select at least one notification method');
+            return;
+        }
+
+        setAlertSubmitting(true);
+        try {
+            const res = await fetch('/api/polymarket/alerts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    marketId: alertMarket.conditionId,
+                    outcome: alertOutcome,
+                    direction: alertDirection,
+                    notifyChannels: alertNotifyChannels,
+                    targetPrice: targetValue,
+                }),
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+                setAlertError(data.error || 'Failed to create alert');
+                return;
+            }
+
+            setAlertMessage('Alert created successfully');
+            await loadAlertsForMarket(alertMarket.conditionId);
+        } catch (error) {
+            console.error('Failed to create market alert:', error);
+            setAlertError('Failed to create alert');
+        } finally {
+            setAlertSubmitting(false);
+        }
+    };
+
+    const deleteAlertForMarket = async (alertId: number) => {
+        try {
+            const res = await fetch(`/api/polymarket/alerts?alertId=${alertId}`, {
+                method: 'DELETE',
+            });
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => null);
+                setAlertError(data?.error || 'Failed to delete alert');
+                return;
+            }
+
+            setAlertRows((prev) => prev.filter((row) => row.alert_id !== alertId));
+        } catch (error) {
+            console.error('Failed to delete market alert:', error);
+            setAlertError('Failed to delete alert');
+        }
     };
 
     // Category tabs
@@ -281,6 +411,21 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                                 strokeWidth={2}
                                                 d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
                                             />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const marketId = currentFeatured.conditionId;
+                                            if (!marketId) return;
+                                            openAlertModal(currentFeatured, e);
+                                        }}
+                                        disabled={!currentFeatured.conditionId}
+                                        className="absolute top-4 right-14 w-9 h-9 rounded-2xl flex items-center justify-center hover:bg-gray-100 transition-all z-10"
+                                        title="Set alert"
+                                    >
+                                        <svg className="w-5 h-5 text-gray-400 hover:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V4a2 2 0 10-4 0v1.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                                         </svg>
                                     </button>
 
@@ -751,13 +896,27 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                                 />
                                             </svg>
                                         </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (!marketId) return;
+                                                openAlertModal(market, e);
+                                            }}
+                                            disabled={!marketId}
+                                            className="absolute top-3 right-11 w-8 h-8 rounded-2xl flex items-center justify-center hover:bg-gray-100 transition-all z-10"
+                                            title="Set alert"
+                                        >
+                                            <svg className="w-4.5 h-4.5 text-gray-400 hover:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V4a2 2 0 10-4 0v1.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                                            </svg>
+                                        </button>
 
                                         {/* Header */}
                                         <div
                                             onClick={() => goToMarket(market)}
                                             className="cursor-pointer"
                                         >
-                                            <div className="flex items-start justify-between mb-3 pr-8">
+                                            <div className="flex items-start justify-between mb-3 pr-16">
                                                 <div className="flex items-center gap-2">
                                                     {market.image ? (
                                                         <img
@@ -813,6 +972,151 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                     )}
                 </div>
             </div>
+
+            {showAlertModal && alertMarket && (
+                <div className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl border border-gray-200">
+                        <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/80 rounded-t-2xl">
+                            <div>
+                                <h3 className="text-lg font-bold text-gray-900">Set Alerts</h3>
+                                <p className="text-xs text-gray-500 truncate max-w-lg">{alertMarket.question}</p>
+                            </div>
+                            <button
+                                onClick={() => setShowAlertModal(false)}
+                                className="w-8 h-8 rounded-lg hover:bg-gray-100 text-gray-500"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div className="p-5 space-y-3">
+                            <div className="bg-gray-50 border border-gray-200 rounded-2xl p-3.5 space-y-2.5">
+                                <div className="grid grid-cols-2 gap-2">
+                                    <label className="block">
+                                        <span className="block text-[11px] font-semibold text-gray-600 mb-1">Outcome</span>
+                                        <CustomSelect
+                                            value={alertOutcome}
+                                            onChange={(nextValue) => setAlertOutcome(nextValue)}
+                                            size="compact"
+                                            tone="soft"
+                                            options={[
+                                                { value: 'YES', label: 'YES' },
+                                                { value: 'NO', label: 'NO' },
+                                            ]}
+                                        />
+                                    </label>
+                                    <label className="block">
+                                        <span className="block text-[11px] font-semibold text-gray-600 mb-1">Direction</span>
+                                        <CustomSelect
+                                            value={alertDirection}
+                                            onChange={(nextValue) => setAlertDirection(nextValue)}
+                                            size="compact"
+                                            tone="soft"
+                                            options={[
+                                                { value: 'ABOVE', label: 'ABOVE' },
+                                                { value: 'BELOW', label: 'BELOW' },
+                                            ]}
+                                        />
+                                    </label>
+                                </div>
+                                <div className="rounded-xl border border-gray-200 bg-white p-3">
+                                    <span className="block text-[11px] font-semibold text-gray-600 mb-2">Notify Via</span>
+                                    <div className="flex flex-wrap gap-3">
+                                        <label className="inline-flex items-center gap-2 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5">
+                                            <input
+                                                type="checkbox"
+                                                checked={alertNotifyChannels.includes('EMAIL')}
+                                                onChange={() => toggleAlertNotifyChannel('EMAIL')}
+                                                disabled={alertSubmitting}
+                                                className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-300"
+                                            />
+                                            Email
+                                        </label>
+                                        <label className="inline-flex items-center gap-2 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5">
+                                            <input
+                                                type="checkbox"
+                                                checked={alertNotifyChannels.includes('DISCORD')}
+                                                onChange={() => toggleAlertNotifyChannel('DISCORD')}
+                                                disabled={alertSubmitting}
+                                                className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-300"
+                                            />
+                                            Discord
+                                        </label>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                                    <label className="block">
+                                        <span className="block text-[11px] font-semibold text-gray-600 mb-1">Target Probability (%)</span>
+                                        <input
+                                            type="number"
+                                            min="0.01"
+                                            max="99.99"
+                                            step="0.01"
+                                            inputMode="decimal"
+                                            value={alertTarget}
+                                            onChange={(e) => setAlertTarget(e.target.value)}
+                                            placeholder="e.g. 57.25"
+                                            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300"
+                                        />
+                                    </label>
+                                    <button
+                                        onClick={createAlertForMarket}
+                                        disabled={alertSubmitting}
+                                        className="h-8 px-3 rounded-xl border border-gray-200 bg-gray-800 hover:bg-gray-900 text-white text-xs font-semibold disabled:opacity-50"
+                                    >
+                                        {alertSubmitting ? 'Saving...' : 'Save'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {alertError && <p className="text-xs text-red-600">{alertError}</p>}
+                            {alertMessage && <p className="text-xs text-emerald-600">{alertMessage}</p>}
+
+                            <div className="overflow-auto border border-gray-200 rounded-2xl max-h-72 bg-white shadow-xs">
+                                {alertsLoading ? (
+                                    <p className="text-sm text-gray-500 px-3 py-3">Loading alerts...</p>
+                                ) : alertRows.filter((row) => row.is_active).length === 0 ? (
+                                    <p className="text-sm text-gray-500 px-3 py-3">No active alerts for this market.</p>
+                                ) : (
+                                    <table className="min-w-full text-xs">
+                                        <thead className="bg-gray-100 text-gray-700 sticky top-0 border-b border-gray-200">
+                                            <tr>
+                                                <th className="text-left px-3 py-2 font-semibold">Outcome</th>
+                                                <th className="text-left px-3 py-2 font-semibold">Direction</th>
+                                                <th className="text-left px-3 py-2 font-semibold">Target</th>
+                                                <th className="text-right px-3 py-2 font-semibold">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {alertRows
+                                                .filter((row) => row.is_active)
+                                                .map((row) => (
+                                                    <tr key={row.alert_id} className="hover:bg-gray-50 transition-colors">
+                                                        <td className="px-3 py-2 text-gray-800 font-semibold">{row.outcome}</td>
+                                                        <td className="px-3 py-2 text-gray-700">
+                                                            <span className="px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 text-gray-700">
+                                                                {row.direction}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-3 py-2 text-gray-800 font-medium">{row.target_price_percent.toFixed(2)}%</td>
+                                                        <td className="px-3 py-2 text-right">
+                                                            <button
+                                                                onClick={() => deleteAlertForMarket(row.alert_id)}
+                                                                className="px-2 py-1 rounded-md text-red-600 hover:text-red-700 hover:bg-red-50 font-medium transition-colors"
+                                                            >
+                                                                Remove
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

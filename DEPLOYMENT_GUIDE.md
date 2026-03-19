@@ -55,6 +55,9 @@ FINNHUB_API_KEY=your-finnhub-api-key
 # Cron Security
 CRON_SECRET=your-secure-random-string
 
+# Discord Notification (optional)
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/xxx/yyy
+
 # Stripe (if using payment features)
 STRIPE_SECRET_KEY=your-stripe-secret-key
 STRIPE_WEBHOOK_SECRET=your-webhook-secret
@@ -124,6 +127,7 @@ vercel
 | `EMAIL_PASS` | `app-password` | Gmail 应用密码 |
 | `FINNHUB_API_KEY` | `your-key` | Finnhub API Key |
 | `CRON_SECRET` | `random-string` | Cron 安全密钥 |
+| `DISCORD_WEBHOOK_URL` | `https://discord.com/api/webhooks/...` | Discord 提醒 Webhook（可选） |
 
 **生成安全的 CRON_SECRET:**
 ```bash

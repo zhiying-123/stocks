@@ -71,6 +71,12 @@ export const sharedRoutes: RouteConfig[] = [
         description: "Manage your balance"
     },
     {
+        path: "/alerts",
+        label: "Alerts",
+        icon: "🔔",
+        description: "Manage reminders"
+    },
+    {
         path: "/profile",
         label: "Profile",
         icon: "👤",
