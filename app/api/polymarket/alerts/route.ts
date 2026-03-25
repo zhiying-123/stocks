@@ -275,7 +275,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "autoBuyQuantity must be a positive number when auto-buy is enabled" }, { status: 400 });
         }
 
-        if ((tpTargetPercent !== undefined || slTargetPercent !== undefined) && !normalizedAutoBuyEnabled) {
+        if (!normalizedAutoBuyEnabled && (normalizedTpTargetPercent !== null || normalizedSlTargetPercent !== null)) {
             return NextResponse.json({ error: "TP/SL linkage requires auto-buy enabled" }, { status: 400 });
         }
 
@@ -529,7 +529,7 @@ export async function PATCH(req: NextRequest) {
                 return NextResponse.json({ error: "autoBuyQuantity must be a positive number when auto-buy is enabled" }, { status: 400 });
             }
 
-            if ((tpTargetPercent !== undefined || slTargetPercent !== undefined) && !normalizedAutoBuyEnabled) {
+            if (!normalizedAutoBuyEnabled && (normalizedTpTargetPercent !== null || normalizedSlTargetPercent !== null)) {
                 return NextResponse.json({ error: "TP/SL linkage requires auto-buy enabled" }, { status: 400 });
             }
 
