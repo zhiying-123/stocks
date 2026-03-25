@@ -41,17 +41,19 @@ type AlertItem = {
     notify_channels_list?: Array<'EMAIL' | 'DISCORD'>;
     target_price: number;
     target_price_percent: number;
+    auto_buy_enabled?: boolean;
+    auto_buy_quantity?: number | null;
+    auto_buy_budget?: number | null;
+    auto_buy_retry_max?: number;
+    auto_buy_retry_count?: number;
+    auto_buy_cooldown_m?: number;
+    auto_buy_next_retry_at?: string | null;
+    auto_buy_last_error?: string | null;
+    tp_target_percent?: number | null;
+    sl_target_percent?: number | null;
     source: string;
     is_active: boolean;
 };
-
-type NotifyMode = 'BOTH' | 'EMAIL' | 'DISCORD';
-
-function modeToChannels(mode: NotifyMode): Array<'EMAIL' | 'DISCORD'> {
-    if (mode === 'EMAIL') return ['EMAIL'];
-    if (mode === 'DISCORD') return ['DISCORD'];
-    return ['EMAIL', 'DISCORD'];
-}
 
 export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatchlist: initialIsInWatchlist, userId, userName }: MarketDetailUIProps) {
     const router = useRouter();
@@ -80,8 +82,15 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
     const [alertsLoading, setAlertsLoading] = useState(false);
     const [alertOutcome, setAlertOutcome] = useState<'YES' | 'NO'>(outcomeParam === 'NO' ? 'NO' : 'YES');
     const [alertDirection, setAlertDirection] = useState<'ABOVE' | 'BELOW'>('ABOVE');
-    const [alertNotifyMode, setAlertNotifyMode] = useState<NotifyMode>('BOTH');
+    const [alertNotifyChannels, setAlertNotifyChannels] = useState<Array<'EMAIL' | 'DISCORD'>>(['EMAIL', 'DISCORD']);
     const [alertTarget, setAlertTarget] = useState('');
+    const [autoBuyEnabled, setAutoBuyEnabled] = useState(false);
+    const [autoBuyQuantity, setAutoBuyQuantity] = useState('10');
+    const [autoBuyBudget, setAutoBuyBudget] = useState('');
+    const [autoBuyRetryMax, setAutoBuyRetryMax] = useState('3');
+    const [autoBuyCooldown, setAutoBuyCooldown] = useState('5');
+    const [tpTargetPercent, setTpTargetPercent] = useState('');
+    const [slTargetPercent, setSlTargetPercent] = useState('');
     const [alertSubmitting, setAlertSubmitting] = useState(false);
     const [alertMessage, setAlertMessage] = useState('');
     const [alertError, setAlertError] = useState('');
@@ -356,6 +365,55 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
         setAlertError('');
         setAlertMessage('');
 
+        if (alertNotifyChannels.length === 0) {
+            setAlertSubmitting(false);
+            setAlertError('Please select at least one notification method');
+            return;
+        }
+
+        if (autoBuyEnabled) {
+            const parsedAutoBuyQuantity = Number(autoBuyQuantity);
+            if (!Number.isFinite(parsedAutoBuyQuantity) || parsedAutoBuyQuantity <= 0) {
+                setAlertSubmitting(false);
+                setAlertError('Auto buy quantity must be a positive number');
+                return;
+            }
+
+            const parsedBudget = autoBuyBudget ? Number(autoBuyBudget) : null;
+            if (parsedBudget != null && (!Number.isFinite(parsedBudget) || parsedBudget <= 0)) {
+                setAlertSubmitting(false);
+                setAlertError('Auto buy budget must be a positive number');
+                return;
+            }
+
+            const parsedRetryMax = Number(autoBuyRetryMax || '0');
+            if (!Number.isFinite(parsedRetryMax) || parsedRetryMax < 0 || parsedRetryMax > 20) {
+                setAlertSubmitting(false);
+                setAlertError('Retry max must be between 0 and 20');
+                return;
+            }
+
+            const parsedCooldown = Number(autoBuyCooldown || '5');
+            if (!Number.isFinite(parsedCooldown) || parsedCooldown < 1 || parsedCooldown > 1440) {
+                setAlertSubmitting(false);
+                setAlertError('Cooldown must be between 1 and 1440 minutes');
+                return;
+            }
+
+            const parsedTp = tpTargetPercent ? Number(tpTargetPercent) : null;
+            const parsedSl = slTargetPercent ? Number(slTargetPercent) : null;
+            if (parsedTp != null && (!Number.isFinite(parsedTp) || parsedTp <= 0 || parsedTp >= 100)) {
+                setAlertSubmitting(false);
+                setAlertError('TP target must be between 0 and 100');
+                return;
+            }
+            if (parsedSl != null && (!Number.isFinite(parsedSl) || parsedSl <= 0 || parsedSl >= 100)) {
+                setAlertSubmitting(false);
+                setAlertError('SL target must be between 0 and 100');
+                return;
+            }
+        }
+
         try {
             const res = await fetch('/api/polymarket/alerts', {
                 method: 'POST',
@@ -364,8 +422,15 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                     marketId: tokenId,
                     outcome: alertOutcome,
                     direction: alertDirection,
-                    notifyChannels: modeToChannels(alertNotifyMode),
+                    notifyChannels: alertNotifyChannels,
                     targetPrice: Number(alertTarget),
+                    autoBuyEnabled,
+                    autoBuyQuantity: autoBuyEnabled ? Number(autoBuyQuantity) : null,
+                    autoBuyBudget: autoBuyEnabled && autoBuyBudget ? Number(autoBuyBudget) : null,
+                    autoBuyRetryMax: autoBuyEnabled ? Number(autoBuyRetryMax || 0) : 0,
+                    autoBuyCooldownMinutes: autoBuyEnabled ? Number(autoBuyCooldown || 5) : 5,
+                    tpTargetPercent: autoBuyEnabled && tpTargetPercent ? Number(tpTargetPercent) : null,
+                    slTargetPercent: autoBuyEnabled && slTargetPercent ? Number(slTargetPercent) : null,
                 }),
             });
 
@@ -377,6 +442,12 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
 
             setAlertMessage('Alert created successfully');
             setAlertTarget('');
+            setAutoBuyEnabled(false);
+            setAutoBuyBudget('');
+            setAutoBuyRetryMax('3');
+            setAutoBuyCooldown('5');
+            setTpTargetPercent('');
+            setSlTargetPercent('');
             await loadAlerts();
         } catch (err) {
             console.error('Failed to create alert:', err);
@@ -384,6 +455,15 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
         } finally {
             setAlertSubmitting(false);
         }
+    }
+
+    function toggleAlertNotifyChannel(channel: 'EMAIL' | 'DISCORD') {
+        setAlertNotifyChannels((prev) => {
+            if (prev.includes(channel)) {
+                return prev.filter((item) => item !== channel);
+            }
+            return [...prev, channel];
+        });
     }
 
     async function deleteAlert(alertId: number) {
@@ -889,19 +969,31 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                             />
                                         </label>
                                     </div>
-                                    <label className="block">
-                                        <span className="block text-[11px] font-semibold text-gray-600 mb-1">Notify Via</span>
-                                        <CustomSelect
-                                            value={alertNotifyMode}
-                                            onChange={(nextValue) => setAlertNotifyMode(nextValue as NotifyMode)}
-                                            disabled={alertSubmitting}
-                                            options={[
-                                                { value: 'BOTH', label: 'Email + Discord' },
-                                                { value: 'EMAIL', label: 'Email Only' },
-                                                { value: 'DISCORD', label: 'Discord Only' },
-                                            ]}
-                                        />
-                                    </label>
+                                    <div className="rounded-xl border border-gray-200 bg-white p-3">
+                                        <span className="block text-[11px] font-semibold text-gray-600 mb-2">Notify Via</span>
+                                        <div className="flex flex-wrap gap-3">
+                                            <label className="inline-flex items-center gap-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={alertNotifyChannels.includes('EMAIL')}
+                                                    onChange={() => toggleAlertNotifyChannel('EMAIL')}
+                                                    disabled={alertSubmitting}
+                                                    className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-300"
+                                                />
+                                                Email
+                                            </label>
+                                            <label className="inline-flex items-center gap-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={alertNotifyChannels.includes('DISCORD')}
+                                                    onChange={() => toggleAlertNotifyChannel('DISCORD')}
+                                                    disabled={alertSubmitting}
+                                                    className="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-300"
+                                                />
+                                                Discord
+                                            </label>
+                                        </div>
+                                    </div>
                                     <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
                                         <label className="block">
                                             <span className="block text-[11px] font-semibold text-gray-600 mb-1">Target Price (%)</span>
@@ -926,6 +1018,94 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                             {alertSubmitting ? 'Saving...' : 'Set Alert'}
                                         </button>
                                     </div>
+                                    <div className="grid grid-cols-[auto_1fr] items-center gap-2 pt-1">
+                                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 select-none">
+                                            <input
+                                                type="checkbox"
+                                                checked={autoBuyEnabled}
+                                                onChange={(e) => setAutoBuyEnabled(e.target.checked)}
+                                                disabled={alertSubmitting}
+                                                className="w-4 h-4 rounded border-gray-300"
+                                            />
+                                            Enable Auto Buy
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="0.1"
+                                            step="0.1"
+                                            inputMode="decimal"
+                                            value={autoBuyQuantity}
+                                            onChange={(e) => setAutoBuyQuantity(e.target.value)}
+                                            disabled={alertSubmitting || !autoBuyEnabled}
+                                            placeholder="Auto buy quantity"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <input
+                                            type="number"
+                                            min="0.01"
+                                            step="0.01"
+                                            inputMode="decimal"
+                                            value={autoBuyBudget}
+                                            onChange={(e) => setAutoBuyBudget(e.target.value)}
+                                            disabled={alertSubmitting || !autoBuyEnabled}
+                                            placeholder="Budget cap"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                        />
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                max="20"
+                                                step="1"
+                                                inputMode="numeric"
+                                                value={autoBuyRetryMax}
+                                                onChange={(e) => setAutoBuyRetryMax(e.target.value)}
+                                                disabled={alertSubmitting || !autoBuyEnabled}
+                                                placeholder="Retry"
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                            />
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                max="1440"
+                                                step="1"
+                                                inputMode="numeric"
+                                                value={autoBuyCooldown}
+                                                onChange={(e) => setAutoBuyCooldown(e.target.value)}
+                                                disabled={alertSubmitting || !autoBuyEnabled}
+                                                placeholder="Cooldown m"
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <input
+                                            type="number"
+                                            min="0.01"
+                                            max="99.99"
+                                            step="0.01"
+                                            inputMode="decimal"
+                                            value={tpTargetPercent}
+                                            onChange={(e) => setTpTargetPercent(e.target.value)}
+                                            disabled={alertSubmitting || !autoBuyEnabled}
+                                            placeholder="TP %"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                        />
+                                        <input
+                                            type="number"
+                                            min="0.01"
+                                            max="99.99"
+                                            step="0.01"
+                                            inputMode="decimal"
+                                            value={slTargetPercent}
+                                            onChange={(e) => setSlTargetPercent(e.target.value)}
+                                            disabled={alertSubmitting || !autoBuyEnabled}
+                                            placeholder="SL %"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                        />
+                                    </div>
                                 </div>
 
                                 {alertError && (
@@ -947,6 +1127,7 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                                     <th className="text-left px-2.5 py-2 font-semibold">Outcome</th>
                                                     <th className="text-left px-2.5 py-2 font-semibold">Direction</th>
                                                     <th className="text-left px-2.5 py-2 font-semibold">Target</th>
+                                                    <th className="text-left px-2.5 py-2 font-semibold">Auto Buy</th>
                                                     <th className="text-right px-2.5 py-2 font-semibold">Action</th>
                                                 </tr>
                                             </thead>
@@ -962,6 +1143,11 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                                                 </span>
                                                             </td>
                                                             <td className="px-2.5 py-2 text-gray-800 font-medium">{alert.target_price_percent.toFixed(2)}%</td>
+                                                            <td className="px-2.5 py-2 text-gray-700 font-medium">
+                                                                {alert.auto_buy_enabled
+                                                                    ? `${Number(alert.auto_buy_quantity || 0).toFixed(2)} shares`
+                                                                    : '-'}
+                                                            </td>
                                                             <td className="px-2.5 py-2 text-right">
                                                                 <button
                                                                     onClick={() => deleteAlert(alert.alert_id)}

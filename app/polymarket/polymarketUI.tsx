@@ -33,6 +33,16 @@ type MarketAlert = {
     direction: 'ABOVE' | 'BELOW';
     notify_channels_list?: Array<'EMAIL' | 'DISCORD'>;
     target_price_percent: number;
+    auto_buy_enabled?: boolean;
+    auto_buy_quantity?: number | null;
+    auto_buy_budget?: number | null;
+    auto_buy_retry_max?: number;
+    auto_buy_retry_count?: number;
+    auto_buy_cooldown_m?: number;
+    auto_buy_next_retry_at?: string | null;
+    auto_buy_last_error?: string | null;
+    tp_target_percent?: number | null;
+    sl_target_percent?: number | null;
     is_active: boolean;
 };
 
@@ -60,6 +70,13 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
     const [alertDirection, setAlertDirection] = useState<'ABOVE' | 'BELOW'>('ABOVE');
     const [alertNotifyChannels, setAlertNotifyChannels] = useState<Array<'EMAIL' | 'DISCORD'>>(['EMAIL', 'DISCORD']);
     const [alertTarget, setAlertTarget] = useState('');
+    const [alertAutoBuyEnabled, setAlertAutoBuyEnabled] = useState(false);
+    const [alertAutoBuyQuantity, setAlertAutoBuyQuantity] = useState('10');
+    const [alertAutoBuyBudget, setAlertAutoBuyBudget] = useState('');
+    const [alertAutoBuyRetryMax, setAlertAutoBuyRetryMax] = useState('3');
+    const [alertAutoBuyCooldown, setAlertAutoBuyCooldown] = useState('5');
+    const [alertTpTargetPercent, setAlertTpTargetPercent] = useState('');
+    const [alertSlTargetPercent, setAlertSlTargetPercent] = useState('');
     const [alertError, setAlertError] = useState('');
     const [alertMessage, setAlertMessage] = useState('');
     const [alertSubmitting, setAlertSubmitting] = useState(false);
@@ -174,6 +191,13 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
         setAlertOutcome('YES');
         setAlertDirection('ABOVE');
         setAlertNotifyChannels(['EMAIL', 'DISCORD']);
+        setAlertAutoBuyEnabled(false);
+        setAlertAutoBuyQuantity('10');
+        setAlertAutoBuyBudget('');
+        setAlertAutoBuyRetryMax('3');
+        setAlertAutoBuyCooldown('5');
+        setAlertTpTargetPercent('');
+        setAlertSlTargetPercent('');
         const yesPrice = market.outcomes?.find((o) => o.name === 'YES')?.price;
         setAlertTarget(yesPrice ? (yesPrice * 100).toFixed(2) : '');
         await loadAlertsForMarket(market.conditionId);
@@ -205,6 +229,43 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
             return;
         }
 
+        if (alertAutoBuyEnabled) {
+            const autoBuyQty = Number(alertAutoBuyQuantity);
+            if (!Number.isFinite(autoBuyQty) || autoBuyQty <= 0) {
+                setAlertError('Auto buy quantity must be a positive number');
+                return;
+            }
+
+            const autoBuyBudget = alertAutoBuyBudget ? Number(alertAutoBuyBudget) : null;
+            if (autoBuyBudget != null && (!Number.isFinite(autoBuyBudget) || autoBuyBudget <= 0)) {
+                setAlertError('Auto buy budget must be a positive number');
+                return;
+            }
+
+            const retryMax = Number(alertAutoBuyRetryMax || '0');
+            if (!Number.isFinite(retryMax) || retryMax < 0 || retryMax > 20) {
+                setAlertError('Retry max must be between 0 and 20');
+                return;
+            }
+
+            const cooldown = Number(alertAutoBuyCooldown || '5');
+            if (!Number.isFinite(cooldown) || cooldown < 1 || cooldown > 1440) {
+                setAlertError('Cooldown must be between 1 and 1440 minutes');
+                return;
+            }
+
+            const tpPercent = alertTpTargetPercent ? Number(alertTpTargetPercent) : null;
+            const slPercent = alertSlTargetPercent ? Number(alertSlTargetPercent) : null;
+            if (tpPercent != null && (!Number.isFinite(tpPercent) || tpPercent <= 0 || tpPercent >= 100)) {
+                setAlertError('TP target must be between 0 and 100');
+                return;
+            }
+            if (slPercent != null && (!Number.isFinite(slPercent) || slPercent <= 0 || slPercent >= 100)) {
+                setAlertError('SL target must be between 0 and 100');
+                return;
+            }
+        }
+
         setAlertSubmitting(true);
         try {
             const res = await fetch('/api/polymarket/alerts', {
@@ -216,6 +277,13 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                     direction: alertDirection,
                     notifyChannels: alertNotifyChannels,
                     targetPrice: targetValue,
+                    autoBuyEnabled: alertAutoBuyEnabled,
+                    autoBuyQuantity: alertAutoBuyEnabled ? Number(alertAutoBuyQuantity) : null,
+                    autoBuyBudget: alertAutoBuyEnabled && alertAutoBuyBudget ? Number(alertAutoBuyBudget) : null,
+                    autoBuyRetryMax: alertAutoBuyEnabled ? Number(alertAutoBuyRetryMax || 0) : 0,
+                    autoBuyCooldownMinutes: alertAutoBuyEnabled ? Number(alertAutoBuyCooldown || 5) : 5,
+                    tpTargetPercent: alertAutoBuyEnabled && alertTpTargetPercent ? Number(alertTpTargetPercent) : null,
+                    slTargetPercent: alertAutoBuyEnabled && alertSlTargetPercent ? Number(alertSlTargetPercent) : null,
                 }),
             });
 
@@ -1067,6 +1135,94 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                         {alertSubmitting ? 'Saving...' : 'Save'}
                                     </button>
                                 </div>
+                                <div className="grid grid-cols-[auto_1fr] items-center gap-2 pt-1">
+                                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 select-none">
+                                        <input
+                                            type="checkbox"
+                                            checked={alertAutoBuyEnabled}
+                                            onChange={(e) => setAlertAutoBuyEnabled(e.target.checked)}
+                                            disabled={alertSubmitting}
+                                            className="w-4 h-4 rounded border-gray-300"
+                                        />
+                                        Enable Auto Buy
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0.1"
+                                        step="0.1"
+                                        inputMode="decimal"
+                                        value={alertAutoBuyQuantity}
+                                        onChange={(e) => setAlertAutoBuyQuantity(e.target.value)}
+                                        disabled={alertSubmitting || !alertAutoBuyEnabled}
+                                        placeholder="Auto buy quantity"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <input
+                                        type="number"
+                                        min="0.01"
+                                        step="0.01"
+                                        inputMode="decimal"
+                                        value={alertAutoBuyBudget}
+                                        onChange={(e) => setAlertAutoBuyBudget(e.target.value)}
+                                        disabled={alertSubmitting || !alertAutoBuyEnabled}
+                                        placeholder="Budget cap"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                    />
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            max="20"
+                                            step="1"
+                                            inputMode="numeric"
+                                            value={alertAutoBuyRetryMax}
+                                            onChange={(e) => setAlertAutoBuyRetryMax(e.target.value)}
+                                            disabled={alertSubmitting || !alertAutoBuyEnabled}
+                                            placeholder="Retry"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                        />
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max="1440"
+                                            step="1"
+                                            inputMode="numeric"
+                                            value={alertAutoBuyCooldown}
+                                            onChange={(e) => setAlertAutoBuyCooldown(e.target.value)}
+                                            disabled={alertSubmitting || !alertAutoBuyEnabled}
+                                            placeholder="Cooldown m"
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <input
+                                        type="number"
+                                        min="0.01"
+                                        max="99.99"
+                                        step="0.01"
+                                        inputMode="decimal"
+                                        value={alertTpTargetPercent}
+                                        onChange={(e) => setAlertTpTargetPercent(e.target.value)}
+                                        disabled={alertSubmitting || !alertAutoBuyEnabled}
+                                        placeholder="TP %"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                    />
+                                    <input
+                                        type="number"
+                                        min="0.01"
+                                        max="99.99"
+                                        step="0.01"
+                                        inputMode="decimal"
+                                        value={alertSlTargetPercent}
+                                        onChange={(e) => setAlertSlTargetPercent(e.target.value)}
+                                        disabled={alertSubmitting || !alertAutoBuyEnabled}
+                                        placeholder="SL %"
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 disabled:bg-gray-100"
+                                    />
+                                </div>
                             </div>
 
                             {alertError && <p className="text-xs text-red-600">{alertError}</p>}
@@ -1084,6 +1240,7 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                                 <th className="text-left px-3 py-2 font-semibold">Outcome</th>
                                                 <th className="text-left px-3 py-2 font-semibold">Direction</th>
                                                 <th className="text-left px-3 py-2 font-semibold">Target</th>
+                                                <th className="text-left px-3 py-2 font-semibold">Auto Buy</th>
                                                 <th className="text-right px-3 py-2 font-semibold">Action</th>
                                             </tr>
                                         </thead>
@@ -1099,6 +1256,9 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                                             </span>
                                                         </td>
                                                         <td className="px-3 py-2 text-gray-800 font-medium">{row.target_price_percent.toFixed(2)}%</td>
+                                                        <td className="px-3 py-2 text-gray-700 font-medium">
+                                                            {row.auto_buy_enabled ? `${Number(row.auto_buy_quantity || 0).toFixed(2)} shares` : '-'}
+                                                        </td>
                                                         <td className="px-3 py-2 text-right">
                                                             <button
                                                                 onClick={() => deleteAlertForMarket(row.alert_id)}

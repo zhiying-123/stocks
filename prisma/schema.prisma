@@ -75,6 +75,32 @@ model StockWatchlist {
   @@index([u_id])
 }
 
+model StockAutoTrader {
+  auto_id             Int       @id @default(autoincrement())
+  u_id                Int
+  symbol              String
+  action              String // "BUY" | "SELL"
+  trigger_type        String // "PRICE_TARGET" | "MOVING_AVERAGE"
+  direction           String // "ABOVE" | "BELOW"
+  target_price        Float? // Used when trigger_type = "PRICE_TARGET"
+  moving_average_days Int? // Used when trigger_type = "MOVING_AVERAGE"
+  quantity            Int
+  notify_channels     String    @default("EMAIL,DISCORD")
+  is_active           Boolean   @default(true)
+  last_checked_price  Float?
+  last_trigger_value  Float?
+  executed_at         DateTime?
+  triggered_at        DateTime?
+  last_error          String?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  @@index([u_id])
+  @@index([symbol])
+  @@index([is_active])
+  @@index([created_at])
+}
+
 model WalletTransaction {
   transaction_id   Int      @id @default(autoincrement())
   u_id             Int
@@ -153,17 +179,30 @@ model PolymarketComment {
 }
 
 model PolymarketPriceAlert {
-  alert_id     Int       @id @default(autoincrement())
-  u_id         Int
-  market_id    String
-  outcome      String    @default("YES") // "YES" or "NO"
-  direction    String // "ABOVE" or "BELOW"
-  target_price Float // Stored in USD probability form (0.00 - 1.00)
-  source       String // "WATCHLIST" or "HOLDING"
-  is_active    Boolean   @default(true)
-  triggered_at DateTime?
-  created_at   DateTime  @default(now())
-  updated_at   DateTime  @updatedAt
+  alert_id             Int       @id @default(autoincrement())
+  u_id                 Int
+  market_id            String
+  outcome              String    @default("YES") // "YES" or "NO"
+  direction            String // "ABOVE" or "BELOW"
+  target_price         Float // Stored in USD probability form (0.00 - 1.00)
+  auto_buy_enabled     Boolean   @default(false)
+  auto_buy_quantity    Float?
+  auto_buy_budget      Float?
+  auto_buy_retry_max   Int       @default(0)
+  auto_buy_retry_count Int       @default(0)
+  auto_buy_cooldown_m  Int       @default(5)
+  auto_buy_next_retry_at DateTime?
+  auto_buy_executed_at DateTime?
+  auto_buy_last_error  String?
+  tp_target_percent    Float?
+  sl_target_percent    Float?
+  parent_alert_id      Int?
+  alert_tag            String? // "TP" | "SL" | null
+  source               String // "WATCHLIST" or "HOLDING"
+  is_active            Boolean   @default(true)
+  triggered_at         DateTime?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
 
   @@index([u_id])
   @@index([market_id])

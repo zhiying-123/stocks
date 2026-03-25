@@ -11,6 +11,22 @@ type MarketSnapshot = {
     noPricePercent: number | null;
 };
 
+type AutoBuyFieldRow = {
+    alert_id: number;
+    auto_buy_enabled: boolean;
+    auto_buy_quantity: number | null;
+    auto_buy_budget: number | null;
+    auto_buy_retry_max: number;
+    auto_buy_retry_count: number;
+    auto_buy_cooldown_m: number;
+    auto_buy_next_retry_at: Date | null;
+    auto_buy_last_error: string | null;
+    tp_target_percent: number | null;
+    sl_target_percent: number | null;
+    parent_alert_id: number | null;
+    alert_tag: string | null;
+};
+
 function parseStringArray(value: unknown): string[] {
     if (!value) return [];
     if (Array.isArray(value)) return value.map((v) => String(v));
@@ -136,6 +152,26 @@ export default async function AlertsPage() {
         orderBy: { created_at: "desc" },
     });
 
+    const autoBuyRows = await prisma.$queryRaw<AutoBuyFieldRow[]>`
+        SELECT
+            "alert_id",
+            "auto_buy_enabled",
+            "auto_buy_quantity",
+            "auto_buy_budget",
+            "auto_buy_retry_max",
+            "auto_buy_retry_count",
+            "auto_buy_cooldown_m",
+            "auto_buy_next_retry_at",
+            "auto_buy_last_error",
+            "tp_target_percent",
+            "sl_target_percent",
+            "parent_alert_id",
+            "alert_tag"
+        FROM "PolymarketPriceAlert"
+        WHERE "u_id" = ${user.id}
+    `;
+    const autoBuyMap = new Map(autoBuyRows.map((row) => [row.alert_id, row]));
+
     const snapshots = await fetchMarketSnapshotsByIds(alerts.map((alert) => alert.market_id));
 
     const normalizedAlerts = alerts.map((alert) => {
@@ -152,6 +188,20 @@ export default async function AlertsPage() {
             current_yes_percent: snapshot?.yesPricePercent ?? null,
             current_no_percent: snapshot?.noPricePercent ?? null,
             notify_channels_list: parseNotifyChannelsFromSource(alert.source),
+            auto_buy_enabled: autoBuyMap.get(alert.alert_id)?.auto_buy_enabled ?? false,
+            auto_buy_quantity: autoBuyMap.get(alert.alert_id)?.auto_buy_quantity ?? null,
+            auto_buy_budget: autoBuyMap.get(alert.alert_id)?.auto_buy_budget ?? null,
+            auto_buy_retry_max: autoBuyMap.get(alert.alert_id)?.auto_buy_retry_max ?? 0,
+            auto_buy_retry_count: autoBuyMap.get(alert.alert_id)?.auto_buy_retry_count ?? 0,
+            auto_buy_cooldown_m: autoBuyMap.get(alert.alert_id)?.auto_buy_cooldown_m ?? 5,
+            auto_buy_next_retry_at: autoBuyMap.get(alert.alert_id)?.auto_buy_next_retry_at
+                ? autoBuyMap.get(alert.alert_id)?.auto_buy_next_retry_at?.toISOString()
+                : null,
+            auto_buy_last_error: autoBuyMap.get(alert.alert_id)?.auto_buy_last_error ?? null,
+            tp_target_percent: autoBuyMap.get(alert.alert_id)?.tp_target_percent ?? null,
+            sl_target_percent: autoBuyMap.get(alert.alert_id)?.sl_target_percent ?? null,
+            parent_alert_id: autoBuyMap.get(alert.alert_id)?.parent_alert_id ?? null,
+            alert_tag: autoBuyMap.get(alert.alert_id)?.alert_tag ?? null,
         };
     });
 
