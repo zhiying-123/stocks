@@ -338,8 +338,8 @@ async function runBacktest(args: BacktestArgs) {
       ? args.targetPrice
       : index + 1 >= (args.movingAverageDays || 0)
         ? prices
-            .slice(index + 1 - (args.movingAverageDays || 0), index + 1)
-            .reduce((sum, item) => sum + item.close, 0) / (args.movingAverageDays || 1)
+          .slice(index + 1 - (args.movingAverageDays || 0), index + 1)
+          .reduce((sum, item) => sum + item.close, 0) / (args.movingAverageDays || 1)
         : null;
 
     const matched = triggerValue !== null && isTriggered(args.direction, point.close, triggerValue);

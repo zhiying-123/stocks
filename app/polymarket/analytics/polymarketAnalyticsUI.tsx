@@ -1026,7 +1026,7 @@ export default function PolymarketAnalyticsUI({
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 mb-1">
-                                            <p className="text-sm font-semibold text-gray-900 truncate">{market.marketName}</p>
+                                        <p className="text-sm font-semibold text-gray-900 truncate">{market.marketName}</p>
                                         {market.category && (
                                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200">
                                                 {market.category}

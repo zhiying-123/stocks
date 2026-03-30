@@ -351,8 +351,8 @@ export async function POST(req: NextRequest) {
         ? config.targetPrice
         : index + 1 >= (config.movingAverageDays || 0)
           ? prices
-              .slice(index + 1 - (config.movingAverageDays || 0), index + 1)
-              .reduce((sum, item) => sum + item.price, 0) / (config.movingAverageDays || 1)
+            .slice(index + 1 - (config.movingAverageDays || 0), index + 1)
+            .reduce((sum, item) => sum + item.price, 0) / (config.movingAverageDays || 1)
           : null;
 
       const matched = triggerValue !== null && isTriggered(config.direction, point.price, triggerValue);
