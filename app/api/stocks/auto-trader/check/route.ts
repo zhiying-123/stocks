@@ -384,11 +384,20 @@ async function notifyExecution({
 
 export async function GET(req: NextRequest) {
     try {
-        const expectedSecret = process.env.STOCK_AUTO_TRADER_CRON_SECRET || process.env.CRON_SECRET;
-        if (expectedSecret) {
+        const acceptedSecrets = Array.from(
+            new Set([
+                process.env.STOCK_AUTO_TRADER_CRON_SECRET,
+                process.env.CRON_SECRET,
+            ].filter((value): value is string => Boolean(value && value.trim())))
+        );
+        if (acceptedSecrets.length > 0) {
             const headerSecret = req.headers.get("x-cron-secret");
+            const authHeader = req.headers.get("authorization") || "";
+            const bearerSecret = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
             const querySecret = req.nextUrl.searchParams.get("secret");
-            if (headerSecret !== expectedSecret && querySecret !== expectedSecret) {
+            const providedSecrets = [headerSecret, querySecret, bearerSecret].filter((value): value is string => Boolean(value && value.trim()));
+            const matched = providedSecrets.some((provided) => acceptedSecrets.includes(provided));
+            if (!matched) {
                 return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
             }
         }

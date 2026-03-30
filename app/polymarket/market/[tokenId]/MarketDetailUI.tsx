@@ -552,13 +552,30 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
     return (
         <div className="min-h-screen bg-white">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-                <button
-                    onClick={() => router.push('/polymarket')}
-                    className="mb-6 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-full hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
-                >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-                    Back to Polymarket
-                </button>
+                <div className="mb-6 flex flex-wrap items-center gap-3">
+                    <button
+                        onClick={() => router.push('/polymarket')}
+                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-full hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                        Back to Polymarket
+                    </button>
+
+                    <button
+                        onClick={() => {
+                            const params = new URLSearchParams({
+                                marketId: tokenId,
+                                marketQuestion: marketInfo.question,
+                                autorun: '1',
+                            });
+                            router.push(`/polymarket/analytics?${params.toString()}`);
+                        }}
+                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-gray-900 border border-gray-900 rounded-full hover:bg-black transition-all shadow-sm"
+                    >
+                        Analyze and Run Backtest
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                    </button>
+                </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Left Side: Market Details & Chart */}

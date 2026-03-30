@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
     PieChart,
     Pie,
@@ -14,10 +15,6 @@ import {
     XAxis,
     YAxis,
     CartesianGrid,
-    LineChart,
-    Line,
-    Area,
-    AreaChart,
 } from 'recharts';
 
 interface Holding {
@@ -44,33 +41,303 @@ interface Transaction {
     transaction_date: Date;
 }
 
-// Soft color palette (pastel/light colors)
-const PASTEL_COLORS = [
-    '#A8DADC', // Light cyan
-    '#E9C46A', // Light gold
-    '#F4A261', // Light coral
-    '#E76F51', // Light terracotta
-    '#B8B8D1', // Light lavender
-    '#C9ADA7', // Light taupe
-    '#F1FAEE', // Off white
-    '#DDA15E', // Light bronze
-];
+interface MarketOption {
+    id: string;
+    question: string;
+}
+
+function parseStringArray(value: unknown): string[] {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map((item) => String(item));
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value) as unknown;
+            return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
+        } catch {
+            return [];
+        }
+    }
+    return [];
+}
+
+interface BacktestResult {
+    config: {
+        marketId: string;
+        action: 'BUY' | 'SELL';
+        triggerType: 'PRICE_TARGET' | 'MOVING_AVERAGE';
+        direction: 'ABOVE' | 'BELOW';
+        targetPrice: number | null;
+        movingAverageDays: number | null;
+        quantity: number;
+        start: string;
+        end: string;
+        initialCash: number;
+        initialPosition: number;
+        mode: 'once' | 'repeat';
+    };
+    market: {
+        points: number;
+        startDate: string;
+        endDate: string;
+        firstPrice: number;
+        lastPrice: number;
+    };
+    result: {
+        tradesExecuted: number;
+        matchedButSkipped: number;
+        endingCash: number;
+        endingPosition: number;
+        initialEquity: number;
+        finalEquity: number;
+        netPnL: number;
+        returnPct: number;
+        maxDrawdownPct: number;
+    };
+    trades: Array<{
+        date: string;
+        action: 'BUY' | 'SELL';
+        price: number;
+        quantity: number;
+        cashAfter: number;
+        positionAfter: number;
+        triggerValue: number;
+    }>;
+    skippedMatches: Array<{
+        date: string;
+        reason: string;
+        price: number;
+        triggerValue: number;
+    }>;
+}
+
+type CategoryDatum = {
+    name: string;
+    value: number;
+    percentage?: number;
+};
+
+type OutcomeDatum = {
+    name: string;
+    value: number;
+};
+
+type MonthlyVolumeDatum = {
+    month: string;
+    bought: number;
+    sold: number;
+};
+
+function formatDateInput(daysAgo: number = 0) {
+    const date = new Date();
+    if (daysAgo > 0) {
+        date.setDate(date.getDate() - daysAgo);
+    }
+
+    // Use local date to avoid UTC day-shift issues in date inputs.
+    const timezoneOffsetMs = date.getTimezoneOffset() * 60 * 1000;
+    return new Date(date.getTime() - timezoneOffsetMs).toISOString().slice(0, 10);
+}
+
+// Soft monochrome palette with very light accents
+const PASTEL_COLORS = ['#E5E7EB', '#D1D5DB', '#CBD5E1', '#E2E8F0', '#F1F5F9', '#E5E7EB', '#F3F4F6', '#D4D4D8'];
 
 const OUTCOME_COLORS = {
-    YES: '#93C5FD', // Light blue
-    NO: '#FCA5A5', // Light red
+    YES: '#E5E7EB',
+    NO: '#D1D5DB',
 };
 
 export default function PolymarketAnalyticsUI({
     holdings,
     transactions,
     currency,
+    marketOptions,
 }: {
     holdings: Holding[];
     transactions: Transaction[];
     currency: string;
+    marketOptions: MarketOption[];
 }) {
+    const searchParams = useSearchParams();
+    const marketPickerRef = useRef<HTMLDivElement>(null);
+    const hasTriggeredAutoRunRef = useRef(false);
+
+    const today = formatDateInput(0);
+
     const [selectedView, setSelectedView] = useState<'category' | 'outcome'>('category');
+    const [availableMarketOptions, setAvailableMarketOptions] = useState<MarketOption[]>(marketOptions);
+    const [isLoadingMarketOptions, setIsLoadingMarketOptions] = useState(false);
+    const [marketId, setMarketId] = useState(marketOptions[0]?.id || '');
+    const [fallbackMarketQuestion, setFallbackMarketQuestion] = useState('');
+    const [marketQuery, setMarketQuery] = useState('');
+    const [isMarketMenuOpen, setIsMarketMenuOpen] = useState(false);
+    const [action, setAction] = useState<'BUY' | 'SELL'>('BUY');
+    const [triggerType, setTriggerType] = useState<'PRICE_TARGET' | 'MOVING_AVERAGE'>('PRICE_TARGET');
+    const [direction, setDirection] = useState<'ABOVE' | 'BELOW'>('BELOW');
+    const [targetPrice, setTargetPrice] = useState('0.55');
+    const [movingAverageDays, setMovingAverageDays] = useState('20');
+    const [quantity, setQuantity] = useState('1');
+    const [startDate, setStartDate] = useState(formatDateInput(365));
+    const [endDate, setEndDate] = useState(today);
+    const [initialCash, setInitialCash] = useState('1000');
+    const [initialPosition, setInitialPosition] = useState('0');
+    const [mode, setMode] = useState<'once' | 'repeat'>('repeat');
+    const [isRunningBacktest, setIsRunningBacktest] = useState(false);
+    const [backtestError, setBacktestError] = useState('');
+    const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
+    const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+
+    useEffect(() => {
+        setAvailableMarketOptions(marketOptions);
+    }, [marketOptions]);
+
+    useEffect(() => {
+        if (availableMarketOptions.length > 0 || isLoadingMarketOptions) {
+            return;
+        }
+
+        let cancelled = false;
+
+        async function loadFallbackMarketOptions() {
+            try {
+                setIsLoadingMarketOptions(true);
+                const response = await fetch('https://gamma-api.polymarket.com/events?limit=300&offset=0&closed=false', {
+                    cache: 'no-store',
+                    headers: { Accept: 'application/json' },
+                });
+
+                if (!response.ok) {
+                    return;
+                }
+
+                const data = (await response.json()) as unknown;
+                if (!Array.isArray(data)) {
+                    return;
+                }
+
+                const map = new Map<string, MarketOption>();
+                for (const event of data) {
+                    if (typeof event !== 'object' || event === null) continue;
+                    const eventRecord = event as Record<string, unknown>;
+                    const markets = eventRecord.markets;
+                    if (!Array.isArray(markets)) continue;
+
+                    for (const market of markets) {
+                        if (typeof market !== 'object' || market === null) continue;
+                        const marketRecord = market as Record<string, unknown>;
+                        const clobIds = parseStringArray(marketRecord.clobTokenIds);
+                        const tokenId = clobIds[0]?.trim() || String(marketRecord.conditionId || '').trim();
+                        if (!tokenId || map.has(tokenId)) continue;
+
+                        const question = String(marketRecord.question || eventRecord.title || tokenId).trim();
+                        map.set(tokenId, {
+                            id: tokenId,
+                            question: question || tokenId,
+                        });
+                    }
+                }
+
+                if (!cancelled) {
+                    setAvailableMarketOptions(Array.from(map.values()));
+                }
+            } catch {
+                // Ignore fallback load errors and keep manual input available.
+            } finally {
+                if (!cancelled) {
+                    setIsLoadingMarketOptions(false);
+                }
+            }
+        }
+
+        void loadFallbackMarketOptions();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [availableMarketOptions.length, isLoadingMarketOptions]);
+
+    useEffect(() => {
+        if (!marketId && availableMarketOptions.length > 0) {
+            setMarketId(availableMarketOptions[0].id);
+            setMarketQuery(availableMarketOptions[0].question);
+        }
+    }, [availableMarketOptions, marketId]);
+
+    useEffect(() => {
+        if (!isReportModalOpen) {
+            return;
+        }
+
+        function onKeyDown(event: KeyboardEvent) {
+            if (event.key === 'Escape') {
+                setIsReportModalOpen(false);
+            }
+        }
+
+        const originalOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        document.addEventListener('keydown', onKeyDown);
+
+        return () => {
+            document.body.style.overflow = originalOverflow;
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [isReportModalOpen]);
+
+    const marketNameMap = useMemo(() => {
+        return new Map(availableMarketOptions.map((option) => [option.id, option.question]));
+    }, [availableMarketOptions]);
+
+    const selectedMarket = useMemo(() => {
+        return availableMarketOptions.find((option) => option.id === marketId) || null;
+    }, [availableMarketOptions, marketId]);
+
+    const selectedMarketLabel = selectedMarket?.question || fallbackMarketQuestion || 'Unknown market';
+
+    const filteredMarketOptions = useMemo(() => {
+        const normalized = marketQuery.trim().toLowerCase();
+        if (!normalized) {
+            return availableMarketOptions.slice(0, 80);
+        }
+
+        return availableMarketOptions
+            .filter((option) => option.question.toLowerCase().includes(normalized))
+            .slice(0, 80);
+    }, [availableMarketOptions, marketQuery]);
+
+    useEffect(() => {
+        function handleOutsideClick(event: MouseEvent) {
+            if (!marketPickerRef.current) return;
+            if (!marketPickerRef.current.contains(event.target as Node)) {
+                setIsMarketMenuOpen(false);
+            }
+        }
+
+        document.addEventListener('mousedown', handleOutsideClick);
+        return () => {
+            document.removeEventListener('mousedown', handleOutsideClick);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!isMarketMenuOpen && selectedMarket?.question) {
+            setMarketQuery(selectedMarket.question);
+        }
+    }, [isMarketMenuOpen, selectedMarket]);
+
+    useEffect(() => {
+        const incomingMarketId = searchParams.get('marketId')?.trim();
+        const incomingMarketQuestion = searchParams.get('marketQuestion')?.trim();
+
+        if (incomingMarketQuestion) {
+            setFallbackMarketQuestion(incomingMarketQuestion);
+        }
+
+        if (incomingMarketId) {
+            setMarketId(incomingMarketId);
+            const matchedOption = availableMarketOptions.find((option) => option.id === incomingMarketId);
+            setMarketQuery(matchedOption?.question || incomingMarketQuestion || incomingMarketId);
+        }
+    }, [availableMarketOptions, searchParams]);
 
     // Exchange rates
     const EXCHANGE_RATES = {
@@ -94,7 +361,7 @@ export default function PolymarketAnalyticsUI({
     const winRate = completedTrades > 0 ? (winningTrades / completedTrades) * 100 : 0;
 
     // Category distribution
-    const categoryData = holdings.reduce((acc: any[], holding) => {
+    const categoryData = holdings.reduce<CategoryDatum[]>((acc, holding) => {
         const category = holding.category || 'Other';
         const value = holding.quantity * holding.avg_price * exchangeRate;
         const existing = acc.find(item => item.name === category);
@@ -114,7 +381,7 @@ export default function PolymarketAnalyticsUI({
     });
 
     // Outcome distribution (YES vs NO)
-    const outcomeData = holdings.reduce((acc: any[], holding) => {
+    const outcomeData = holdings.reduce<OutcomeDatum[]>((acc, holding) => {
         const existing = acc.find(item => item.name === holding.outcome);
         const value = holding.quantity * holding.avg_price * exchangeRate;
 
@@ -127,7 +394,7 @@ export default function PolymarketAnalyticsUI({
     }, []);
 
     // Monthly trading volume
-    const monthlyVolume = transactions.reduce((acc: any[], tx) => {
+    const monthlyVolume = transactions.reduce<MonthlyVolumeDatum[]>((acc, tx) => {
         const month = new Date(tx.transaction_date).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
         const value = tx.total_amount * exchangeRate;
         const existing = acc.find(item => item.month === month);
@@ -151,13 +418,383 @@ export default function PolymarketAnalyticsUI({
     // Top markets by value
     const topMarkets = holdings
         .map(h => ({
-            marketId: h.market_id.slice(0, 12) + '...',
+            marketName: marketNameMap.get(h.market_id) || fallbackMarketQuestion || `Market ${h.market_id.slice(0, 8)}...`,
             category: h.category || 'Other',
             value: h.quantity * h.avg_price * exchangeRate,
             outcome: h.outcome,
         }))
         .sort((a, b) => b.value - a.value)
         .slice(0, 5);
+
+    async function runBacktest() {
+        try {
+            setIsRunningBacktest(true);
+            setBacktestError('');
+
+            if (!marketId.trim()) {
+                throw new Error('Please select a market from the dropdown');
+            }
+
+            if (endDate < startDate) {
+                throw new Error('End date cannot be earlier than start date');
+            }
+
+            const payload = {
+                marketId: marketId.trim(),
+                action,
+                triggerType,
+                direction,
+                targetPrice: triggerType === 'PRICE_TARGET' ? Number(targetPrice) : null,
+                movingAverageDays: triggerType === 'MOVING_AVERAGE' ? Number(movingAverageDays) : null,
+                quantity: Number(quantity),
+                start: startDate,
+                end: endDate,
+                initialCash: Number(initialCash),
+                initialPosition: Number(initialPosition),
+                mode,
+            };
+
+            const response = await fetch('/api/polymarket/backtest-auto-buy-sell', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data?.error || 'Backtest failed');
+            }
+
+            setBacktestResult(data as BacktestResult);
+            setIsReportModalOpen(true);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Backtest failed';
+            setBacktestError(message);
+            setBacktestResult(null);
+            setIsReportModalOpen(false);
+        } finally {
+            setIsRunningBacktest(false);
+        }
+    }
+
+    useEffect(() => {
+        const shouldAutoRun = searchParams.get('autorun') === '1';
+        if (!shouldAutoRun || !marketId || hasTriggeredAutoRunRef.current) {
+            return;
+        }
+
+        hasTriggeredAutoRunRef.current = true;
+        void runBacktest();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [marketId, searchParams]);
+
+    const backtestPanel = (
+        <div className="bg-linear-to-b from-white to-gray-50 rounded-2xl border border-gray-200 shadow-sm p-6 space-y-5">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Auto Buy/Sell Backtest</h3>
+                    <p className="text-xs text-gray-500 mt-1">Historical simulation for Polymarket market rules</p>
+                </div>
+                <button
+                    onClick={runBacktest}
+                    disabled={isRunningBacktest}
+                    className="px-4 py-2 text-sm font-semibold text-white bg-gray-900 hover:bg-black disabled:bg-gray-400 rounded-xl transition-colors"
+                >
+                    {isRunningBacktest ? 'Running...' : 'Run Backtest'}
+                </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Market</label>
+                    <div ref={marketPickerRef} className="relative">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIsMarketMenuOpen((prev) => !prev);
+                                if (!isMarketMenuOpen) {
+                                    setMarketQuery(selectedMarket?.question || fallbackMarketQuestion || '');
+                                }
+                            }}
+                            className="w-full px-3 py-2 rounded-xl border border-gray-300 bg-white text-left text-sm text-gray-800 hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                        >
+                            <span className="flex items-center justify-between gap-2">
+                                <span className="truncate">{selectedMarket?.question || fallbackMarketQuestion || 'Select a market'}</span>
+                                <svg className={`w-4 h-4 text-gray-500 transition-transform ${isMarketMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </span>
+                        </button>
+
+                        {isMarketMenuOpen && (
+                            <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+                                <div className="border-b border-gray-100 p-2">
+                                    <input
+                                        type="text"
+                                        value={marketQuery}
+                                        onChange={(event) => setMarketQuery(event.target.value)}
+                                        placeholder="Type keywords to filter events..."
+                                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                                    />
+                                </div>
+
+                                <div className="max-h-64 overflow-auto py-1">
+                                    {isLoadingMarketOptions && (
+                                        <p className="px-3 py-2 text-sm text-gray-500">Loading markets...</p>
+                                    )}
+
+                                    {filteredMarketOptions.length === 0 ? (
+                                        <div className="px-3 py-2 space-y-2">
+                                            <p className="text-sm text-gray-500">No matching markets</p>
+                                            {marketQuery.trim() && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const typedValue = marketQuery.trim();
+                                                        setMarketId(typedValue);
+                                                        setFallbackMarketQuestion(typedValue);
+                                                        setIsMarketMenuOpen(false);
+                                                    }}
+                                                    className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                                                >
+                                                    Use "{marketQuery.trim()}" as market identifier
+                                                </button>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        filteredMarketOptions.map((option) => (
+                                            <button
+                                                key={option.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    setMarketId(option.id);
+                                                    setMarketQuery(option.question);
+                                                    setIsMarketMenuOpen(false);
+                                                    setFallbackMarketQuestion(option.question);
+                                                }}
+                                                className={`w-full px-3 py-2 text-left text-sm transition-colors ${option.id === marketId
+                                                    ? 'bg-gray-900 text-white'
+                                                    : 'text-gray-700 hover:bg-gray-100'
+                                                    }`}
+                                                title={option.question}
+                                            >
+                                                {option.question}
+                                            </button>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    <p className="mt-1 truncate text-[11px] text-gray-500">Selected event: {selectedMarketLabel}</p>
+                </div>
+                <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Action</label>
+                    <select value={action} onChange={(event) => setAction(event.target.value as 'BUY' | 'SELL')} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200">
+                        <option value="BUY">BUY</option>
+                        <option value="SELL">SELL</option>
+                    </select>
+                </div>
+                <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Trigger</label>
+                    <select value={triggerType} onChange={(event) => setTriggerType(event.target.value as 'PRICE_TARGET' | 'MOVING_AVERAGE')} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200">
+                        <option value="PRICE_TARGET">PRICE_TARGET</option>
+                        <option value="MOVING_AVERAGE">MOVING_AVERAGE</option>
+                    </select>
+                </div>
+                <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Direction</label>
+                    <select value={direction} onChange={(event) => setDirection(event.target.value as 'ABOVE' | 'BELOW')} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200">
+                        <option value="ABOVE">ABOVE</option>
+                        <option value="BELOW">BELOW</option>
+                    </select>
+                </div>
+
+                {triggerType === 'PRICE_TARGET' ? (
+                    <div>
+                        <label className="block text-xs font-semibold text-gray-500 mb-1">Target Price (0-1)</label>
+                        <input type="number" min="0" max="1" step="0.0001" value={targetPrice} onChange={(event) => setTargetPrice(event.target.value)} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200" />
+                    </div>
+                ) : (
+                    <div>
+                        <label className="block text-xs font-semibold text-gray-500 mb-1">MA Days</label>
+                        <input type="number" min="2" value={movingAverageDays} onChange={(event) => setMovingAverageDays(event.target.value)} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200" />
+                    </div>
+                )}
+
+                <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Quantity</label>
+                    <input type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200" />
+                </div>
+                <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Start</label>
+                    <input
+                        type="date"
+                        max={today}
+                        value={startDate}
+                        onChange={(event) => {
+                            const rawStart = event.target.value;
+                            const nextStart = rawStart > today ? today : rawStart;
+                            setStartDate(nextStart);
+                            if (endDate < nextStart) {
+                                setEndDate(nextStart);
+                            }
+                        }}
+                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                    />
+                </div>
+                <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">End</label>
+                    <input
+                        type="date"
+                        min={startDate || today}
+                        max={today}
+                        value={endDate}
+                        onChange={(event) => {
+                            const rawEnd = event.target.value;
+                            let nextEnd = rawEnd > today ? today : rawEnd;
+                            if (nextEnd < startDate) {
+                                nextEnd = startDate;
+                            }
+                            setEndDate(nextEnd);
+                        }}
+                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                    />
+                </div>
+
+                <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Initial Cash (USDC)</label>
+                    <input type="number" min="0" step="0.01" value={initialCash} onChange={(event) => setInitialCash(event.target.value)} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200" />
+                </div>
+                <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Initial Position</label>
+                    <input type="number" min="0" step="0.0001" value={initialPosition} onChange={(event) => setInitialPosition(event.target.value)} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200" />
+                </div>
+                <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Mode</label>
+                    <select value={mode} onChange={(event) => setMode(event.target.value as 'once' | 'repeat')} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200">
+                        <option value="repeat">repeat</option>
+                        <option value="once">once</option>
+                    </select>
+                </div>
+            </div>
+
+            {backtestError && (
+                <div className="px-4 py-3 rounded-xl border border-red-200 bg-red-50 text-sm text-red-700">
+                    {backtestError}
+                </div>
+            )}
+
+            {backtestResult && (
+                <div className="rounded-xl border border-gray-200 bg-white/90 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Backtest ready</p>
+                            <p className="text-sm text-gray-700 mt-1">Report generated for <span className="font-semibold text-gray-900">{selectedMarketLabel}</span></p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${backtestResult.result.netPnL >= 0 ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-rose-50 text-rose-600 border border-rose-100'}`}>
+                                PnL {backtestResult.result.netPnL >= 0 ? '+' : ''}{backtestResult.result.netPnL.toFixed(2)}
+                            </span>
+                            <button
+                                onClick={() => setIsReportModalOpen(true)}
+                                className="px-3.5 py-2 rounded-lg bg-gray-900 text-white text-sm font-semibold hover:bg-black transition-colors"
+                            >
+                                View Report Table
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+
+    const backtestReportModal = backtestResult && isReportModalOpen ? (
+        <div className="fixed inset-0 z-80 flex items-center justify-center p-4 sm:p-6">
+            <div
+                className="absolute inset-0 bg-black/35 backdrop-blur-sm"
+                onClick={() => setIsReportModalOpen(false)}
+            />
+
+            <div className="relative w-full max-w-6xl rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden">
+                <div className="flex items-start justify-between gap-4 border-b border-gray-200 bg-linear-to-r from-white to-gray-50 px-5 py-4">
+                    <div>
+                        <h3 className="text-base font-bold text-gray-900">Backtest Report</h3>
+                        <p className="text-sm text-gray-600 mt-1">{selectedMarketLabel}</p>
+                    </div>
+                    <button
+                        onClick={() => setIsReportModalOpen(false)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                        aria-label="Close report"
+                    >
+                        ×
+                    </button>
+                </div>
+
+                <div className="max-h-[80vh] overflow-auto p-5 space-y-5">
+                    <div className="rounded-xl border border-gray-200 overflow-hidden">
+                        <table className="w-full text-sm">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-4 py-2.5 text-left font-semibold text-gray-600">Metric</th>
+                                    <th className="px-4 py-2.5 text-left font-semibold text-gray-600">Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Trades Executed</td><td className="px-4 py-2.5 font-semibold text-gray-900">{backtestResult.result.tradesExecuted}</td></tr>
+                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Return</td><td className="px-4 py-2.5 font-semibold text-gray-900">{backtestResult.result.returnPct.toFixed(2)}%</td></tr>
+                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Net PnL</td><td className={`px-4 py-2.5 font-semibold ${backtestResult.result.netPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{backtestResult.result.netPnL >= 0 ? '+' : ''}{backtestResult.result.netPnL.toFixed(2)}</td></tr>
+                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Max Drawdown</td><td className="px-4 py-2.5 font-semibold text-gray-900">{backtestResult.result.maxDrawdownPct.toFixed(2)}%</td></tr>
+                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Selected Range</td><td className="px-4 py-2.5 font-semibold text-gray-900">{backtestResult.config.start} → {backtestResult.config.end}</td></tr>
+                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Data Covered Range</td><td className="px-4 py-2.5 font-semibold text-gray-900">{backtestResult.market.startDate} → {backtestResult.market.endDate}</td></tr>
+                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Price Range</td><td className="px-4 py-2.5 font-semibold text-gray-900">{backtestResult.market.firstPrice.toFixed(4)} → {backtestResult.market.lastPrice.toFixed(4)}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 overflow-hidden">
+                        <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Executed Trades</p>
+                        </div>
+                        <div className="max-h-72 overflow-auto">
+                            {backtestResult.trades.length === 0 ? (
+                                <div className="px-4 py-6 text-sm text-gray-500">No trades executed for selected parameters.</div>
+                            ) : (
+                                <table className="w-full text-sm">
+                                    <thead className="bg-white border-b border-gray-100 sticky top-0">
+                                        <tr>
+                                            <th className="text-left px-4 py-2 font-semibold text-gray-500">Date</th>
+                                            <th className="text-left px-4 py-2 font-semibold text-gray-500">Action</th>
+                                            <th className="text-left px-4 py-2 font-semibold text-gray-500">Price</th>
+                                            <th className="text-left px-4 py-2 font-semibold text-gray-500">Qty</th>
+                                            <th className="text-left px-4 py-2 font-semibold text-gray-500">Trigger</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {backtestResult.trades.map((trade, index) => (
+                                            <tr key={`${trade.date}-${index}`} className="border-b border-gray-50 last:border-b-0">
+                                                <td className="px-4 py-2 text-gray-700">{trade.date}</td>
+                                                <td className="px-4 py-2">
+                                                    <span className={`inline-flex px-2 py-0.5 text-xs font-bold rounded-full ${trade.action === 'BUY' ? 'bg-sky-50 text-sky-600 border border-sky-100' : 'bg-orange-50 text-orange-600 border border-orange-100'}`}>
+                                                        {trade.action}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-2 text-gray-700">{trade.price.toFixed(4)}</td>
+                                                <td className="px-4 py-2 text-gray-700">{trade.quantity}</td>
+                                                <td className="px-4 py-2 text-gray-700">{trade.triggerValue.toFixed(4)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    ) : null;
 
     if (holdings.length === 0 && transactions.length === 0) {
         return (
@@ -192,24 +829,29 @@ export default function PolymarketAnalyticsUI({
                         </svg>
                     </Link>
                 </div>
+
+                {backtestPanel}
+                {backtestReportModal}
             </div>
         );
     }
 
     return (
-        <div className="max-w-340 mx-auto px-6 space-y-8">
+        <div className="max-w-340 mx-auto px-6 py-4 space-y-8">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Market Analytics</h1>
-                    <p className="text-sm text-gray-400 mt-1">Comprehensive analysis of your predictions</p>
+                    <p className="text-sm text-gray-500 mt-1">Comprehensive analysis of your predictions</p>
                 </div>
                 <Link href="/polymarket/overview">
-                    <button className="px-4 py-2 text-sm font-semibold text-gray-600 bg-white hover:bg-gray-50 rounded-xl transition-all border border-gray-100">
+                    <button className="px-4 py-2 text-sm font-semibold text-gray-700 bg-white hover:bg-gray-100 rounded-xl transition-all border border-gray-200">
                         ← Back to Overview
                     </button>
                 </Link>
             </div>
+
+            {backtestPanel}
 
             {/* Key Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -306,7 +948,7 @@ export default function PolymarketAnalyticsUI({
                                 cx="50%"
                                 cy="50%"
                                 labelLine={false}
-                                label={(entry: any) => {
+                                label={(entry: { name: string; value: number }) => {
                                     const data = selectedView === 'category' ? categoryData : outcomeData;
                                     const total = data.reduce((sum, item) => sum + item.value, 0);
                                     const percent = total > 0 ? (entry.value / total * 100).toFixed(1) : '0.0';
@@ -384,7 +1026,7 @@ export default function PolymarketAnalyticsUI({
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 mb-1">
-                                        <p className="text-sm font-semibold text-gray-900 truncate">{market.marketId}</p>
+                                            <p className="text-sm font-semibold text-gray-900 truncate">{market.marketName}</p>
                                         {market.category && (
                                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200">
                                                 {market.category}
@@ -392,8 +1034,8 @@ export default function PolymarketAnalyticsUI({
                                         )}
                                     </div>
                                     <span className={`inline-flex px-2 py-0.5 text-xs font-bold rounded-full ${market.outcome === 'YES'
-                                        ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                        : 'bg-red-50 text-red-700 border border-red-200'
+                                        ? 'bg-gray-100 text-gray-700 border border-gray-200'
+                                        : 'bg-gray-200 text-gray-700 border border-gray-300'
                                         }`}>
                                         {market.outcome}
                                     </span>
@@ -412,6 +1054,8 @@ export default function PolymarketAnalyticsUI({
                     )}
                 </div>
             </div>
+
+            {backtestReportModal}
         </div>
     );
 }
