@@ -94,43 +94,59 @@ function parsePricePair(value: unknown): [number, number] | null {
     return [yes, no];
 }
 
-async function fetchPriceMap() {
-    const response = await fetch(`${POLYMARKET_API}/events?limit=500&offset=0&closed=false`, {
-        cache: "no-store",
-        headers: {
-            Accept: "application/json",
-        },
-    });
-
-    if (!response.ok) {
-        throw new Error(`Polymarket events fetch failed: ${response.status}`);
-    }
-
-    const data = await response.json();
+async function fetchPriceMap(requiredMarketIds: Set<string>) {
     const priceMap = new Map<string, MarketPriceInfo>();
+    if (requiredMarketIds.size === 0) return priceMap;
 
-    if (!Array.isArray(data)) {
-        return priceMap;
-    }
+    const limit = 500;
+    const maxPages = 12;
 
-    for (const event of data) {
-        if (!event?.markets || !Array.isArray(event.markets)) continue;
+    for (let page = 0; page < maxPages; page += 1) {
+        const offset = page * limit;
+        const response = await fetch(`${POLYMARKET_API}/events?limit=${limit}&offset=${offset}&closed=false`, {
+            cache: "no-store",
+            headers: {
+                Accept: "application/json",
+            },
+            signal: AbortSignal.timeout(10000),
+        });
 
-        for (const market of event.markets) {
-            const parsedPrices = parsePricePair(market?.outcomePrices);
-            if (!parsedPrices) continue;
+        if (!response.ok) {
+            throw new Error(`Polymarket events fetch failed: ${response.status}`);
+        }
 
-            const [yesPrice, noPrice] = parsedPrices;
+        const data = await response.json();
+        if (!Array.isArray(data) || data.length === 0) {
+            break;
+        }
 
-            const clobIds = parseStringArray(market?.clobTokenIds);
-            const tokenId = clobIds[0]?.trim() || String(market?.conditionId || "").trim();
-            if (!tokenId) continue;
+        for (const event of data) {
+            if (!event?.markets || !Array.isArray(event.markets)) continue;
 
-            priceMap.set(tokenId, {
-                yes: yesPrice,
-                no: noPrice,
-                question: String(market?.question || event?.title || tokenId),
-            });
+            for (const market of event.markets) {
+                const parsedPrices = parsePricePair(market?.outcomePrices);
+                if (!parsedPrices) continue;
+
+                const [yesPrice, noPrice] = parsedPrices;
+
+                const clobIds = parseStringArray(market?.clobTokenIds);
+                const tokenId = clobIds[0]?.trim() || String(market?.conditionId || "").trim();
+                if (!tokenId || !requiredMarketIds.has(tokenId)) continue;
+
+                priceMap.set(tokenId, {
+                    yes: yesPrice,
+                    no: noPrice,
+                    question: String(market?.question || event?.title || tokenId),
+                });
+            }
+        }
+
+        if (priceMap.size >= requiredMarketIds.size) {
+            break;
+        }
+
+        if (data.length < limit) {
+            break;
         }
     }
 
@@ -424,8 +440,10 @@ export async function GET(req: NextRequest) {
             });
         }
 
+        const requiredMarketIds = new Set(activeAlerts.map((alert) => alert.market_id));
+
         const [priceMap, users] = await Promise.all([
-            fetchPriceMap(),
+            fetchPriceMap(requiredMarketIds),
             prisma.user.findMany({
                 where: {
                     u_id: {

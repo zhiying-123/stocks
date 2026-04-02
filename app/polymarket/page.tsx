@@ -111,6 +111,18 @@ async function getUserWallet(userId: number) {
     }
 }
 
+async function getUserWatchlist(userId: number) {
+    try {
+        const userWatchlist = await prisma.polymarketWatchlist.findMany({
+            where: { u_id: userId },
+        });
+        return userWatchlist.map((w: any) => w.market_id);
+    } catch (error) {
+        console.error("Error fetching polymarket watchlist:", error);
+        return [];
+    }
+}
+
 export default async function PolymarketPage() {
     const { isLoggedIn, user } = await getAuthState();
 
@@ -123,13 +135,7 @@ export default async function PolymarketPage() {
     const currency = wallet?.currency || "MYR";
 
     // Fetch user's watchlist
-    let watchlist: string[] = [];
-    if (user?.id) {
-        const userWatchlist = await prisma.polymarketWatchlist.findMany({
-            where: { u_id: user.id }
-        });
-        watchlist = userWatchlist.map((w: any) => w.market_id);
-    }
+    const watchlist = user?.id ? await getUserWatchlist(user.id) : [];
 
     return <PolymarketUI markets={markets} currency={currency} watchlist={watchlist} />;
 }

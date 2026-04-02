@@ -48,15 +48,15 @@ export default function ProfileUI({ userId, initialName, email }: ProfileUIProps
     };
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-5">
             {/* Name */}
-            <div className="group">
+            <div className="group rounded-2xl border border-gray-200 bg-gray-50 p-4">
                 <div className="flex items-center justify-between mb-2">
-                    <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Name</label>
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-[0.12em]">Display Name</label>
                     {!isEditingName ? (
                         <button
                             onClick={() => setIsEditingName(true)}
-                            className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+                            className="text-xs font-semibold text-gray-700 hover:text-gray-900"
                         >
                             Edit
                         </button>
@@ -68,14 +68,14 @@ export default function ProfileUI({ userId, initialName, email }: ProfileUIProps
                                     setName(initialName);
                                     setError('');
                                 }}
-                                className="text-xs font-semibold text-gray-600 hover:text-gray-700"
+                                className="text-xs font-semibold text-gray-600 hover:text-gray-800"
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={handleSaveName}
                                 disabled={saving}
-                                className="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-50"
+                                className="text-xs font-semibold text-gray-900 hover:text-black disabled:opacity-50"
                             >
                                 {saving ? 'Saving...' : 'Save'}
                             </button>
@@ -87,11 +87,11 @@ export default function ProfileUI({ userId, initialName, email }: ProfileUIProps
                         type="text"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        className="w-full px-3 py-2 text-base font-semibold text-gray-900 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="w-full px-3 py-2 text-base font-semibold text-gray-900 border border-gray-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-transparent"
                         placeholder="Enter your name"
                     />
                 ) : (
-                    <p className="text-base font-semibold text-gray-900">
+                    <p className="text-lg font-semibold text-gray-900">
                         {name || 'Not set'}
                     </p>
                 )}
@@ -101,9 +101,9 @@ export default function ProfileUI({ userId, initialName, email }: ProfileUIProps
             </div>
 
             {/* Email */}
-            <div className="group pt-4 border-t border-gray-100">
-                <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Email Address</label>
-                <p className="text-base font-semibold text-gray-900 mt-2">
+            <div className="group rounded-2xl border border-gray-200 bg-white p-4">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-[0.12em]">Email Address</label>
+                <p className="text-base font-semibold text-gray-900 mt-2 break-all">
                     {email}
                 </p>
             </div>

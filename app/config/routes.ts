@@ -77,6 +77,12 @@ export const sharedRoutes: RouteConfig[] = [
         description: "Manage reminders"
     },
     {
+        path: "/admin/ops",
+        label: "Ops",
+        icon: "🛠️",
+        description: "Operations dashboard"
+    },
+    {
         path: "/profile",
         label: "Profile",
         icon: "👤",

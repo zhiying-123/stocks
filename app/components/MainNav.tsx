@@ -4,7 +4,8 @@
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { modules, sharedRoutes, type ModuleConfig } from "../config/routes";
+import { modules, sharedRoutes } from "../config/routes";
+import LogoutButton from "../logout/LogoutButton";
 
 interface MainNavProps {
     userName?: string;
@@ -38,26 +39,26 @@ export default function MainNav({ userName }: MainNavProps) {
     };
 
     return (
-        <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-200/60">
+        <nav className="sticky top-0 z-50 border-b border-gray-200 bg-white/95 backdrop-blur-xl shadow-[0_1px_0_rgba(0,0,0,0.02)]">
             <div className="max-w-7xl mx-auto px-6">
-                <div className="flex items-center justify-between h-16">
+                <div className="flex items-center justify-between h-18">
                     {/* Logo */}
                     <Link href="/" className="flex items-center gap-3 group">
-                        <div className="text-3xl transition-transform group-hover:scale-110">
-                            🐱
+                        <div className="h-9 w-9 rounded-lg bg-gray-900 text-white flex items-center justify-center text-[11px] font-bold tracking-[0.18em]">
+                            TP
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-lg font-bold text-gray-900 tracking-tight">
+                            <span className="text-[15px] font-semibold text-gray-900 tracking-tight leading-tight">
                                 Trading Platform
                             </span>
-                            <span className="text-xs text-gray-500 -mt-1">
-                                Stocks • Predictions
+                            <span className="text-[11px] uppercase tracking-[0.14em] text-gray-500 mt-0.5">
+                                Markets Workspace
                             </span>
                         </div>
                     </Link>
 
                     {/* Main Navigation */}
-                    <div className="flex items-center gap-2" ref={dropdownRef}>
+                    <div className="flex items-center gap-1.5" ref={dropdownRef}>
                         {/* Module Dropdowns */}
                         {modules.map((module) => {
                             const isActive = isModuleActive(module.key);
@@ -68,18 +69,17 @@ export default function MainNav({ userName }: MainNavProps) {
                                     <button
                                         onClick={() => toggleDropdown(module.key)}
                                         className={`
-                                            flex items-center gap-2 px-4 py-2 rounded-lg
-                                            text-sm font-medium transition-all
+                                            flex items-center gap-2 px-3.5 py-2 rounded-lg
+                                            text-[13px] font-medium transition-all
                                             ${isActive
-                                                ? "bg-gray-200 text-gray-900"
+                                                ? "bg-gray-900 text-white"
                                                 : "text-gray-700 hover:bg-gray-100"
                                             }
                                         `}
                                     >
-                                        <span>{module.icon}</span>
                                         <span>{module.label}</span>
                                         <svg
-                                            className={`w-4 h-4 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                                            className={`w-3.5 h-3.5 transition-transform ${isOpen ? "rotate-180" : ""}`}
                                             fill="none"
                                             stroke="currentColor"
                                             viewBox="0 0 24 24"
@@ -104,7 +104,6 @@ export default function MainNav({ userName }: MainNavProps) {
                                                         }
                                                     `}
                                                 >
-                                                    <span className="text-xl">{route.icon}</span>
                                                     <div className="flex-1">
                                                         <div className="font-medium text-sm">
                                                             {route.label}
@@ -134,15 +133,14 @@ export default function MainNav({ userName }: MainNavProps) {
                                     key={route.path}
                                     href={route.path}
                                     className={`
-                                        flex items-center gap-2 px-4 py-2 rounded-lg
-                                        text-sm font-medium transition-all
+                                        flex items-center gap-2 px-3.5 py-2 rounded-lg
+                                        text-[13px] font-medium transition-all
                                         ${isActive
-                                            ? "bg-gray-200 text-gray-900"
+                                            ? "bg-gray-900 text-white"
                                             : "text-gray-700 hover:bg-gray-100"
                                         }
                                     `}
                                 >
-                                    <span>{route.icon}</span>
                                     <span>{route.label}</span>
                                 </Link>
                             );
@@ -152,13 +150,18 @@ export default function MainNav({ userName }: MainNavProps) {
                         {userName && (
                             <>
                                 <div className="w-px h-6 bg-gray-300 mx-2" />
-                                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100">
-                                    <div className="w-7 h-7 rounded-full bg-gray-900 flex items-center justify-center text-white text-xs font-bold">
+                                <div className="flex items-center gap-2 pl-2.5 pr-1.5 py-1.5 rounded-xl border border-gray-200 bg-white shadow-sm">
+                                    <div className="w-8 h-8 rounded-lg bg-gray-900 flex items-center justify-center text-white text-xs font-semibold">
                                         {userName.charAt(0).toUpperCase()}
                                     </div>
-                                    <span className="text-sm font-medium text-gray-900">
-                                        {userName}
-                                    </span>
+                                    <div className="max-w-36">
+                                        <p className="text-[10px] uppercase tracking-[0.12em] text-gray-500">Account</p>
+                                        <p className="text-sm font-semibold text-gray-900 truncate -mt-0.5">{userName}</p>
+                                    </div>
+                                    <LogoutButton
+                                        iconOnly
+                                        className="inline-flex items-center justify-center p-2 rounded-lg border border-gray-300 bg-gray-50 text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                                    />
                                 </div>
                             </>
                         )}

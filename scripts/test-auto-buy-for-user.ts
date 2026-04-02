@@ -14,13 +14,27 @@ function buildCheckUrls() {
   ];
 }
 
+function buildCheckHeaders(secret?: string): Record<string, string> {
+  if (!secret) return {};
+  return {
+    "x-cron-secret": secret,
+    Authorization: `Bearer ${secret}`,
+  };
+}
+
 async function triggerChecker() {
   const urls = Array.from(new Set(buildCheckUrls()));
+  const secret = process.env.POLYMARKET_ALERT_CRON_SECRET || process.env.CRON_SECRET;
+  const headers = buildCheckHeaders(secret);
   let lastError: unknown = null;
 
   for (const url of urls) {
     try {
-      const response = await fetch(url, { method: "GET" });
+      const response = await fetch(url, {
+        method: "GET",
+        headers,
+        signal: AbortSignal.timeout(12000),
+      });
       const payload = await response.json().catch(() => ({}));
       if (response.ok) {
         return { url, payload };
@@ -31,7 +45,13 @@ async function triggerChecker() {
     }
   }
 
-  throw new Error(`Failed to trigger checker: ${String(lastError)}`);
+  throw new Error(
+    [
+      `Failed to trigger checker: ${String(lastError)}`,
+      `Tried URLs: ${urls.join(", ")}`,
+      "Make sure next dev server is running and POLYMARKET_ALERT_CRON_SECRET (or CRON_SECRET) matches the API checker route.",
+    ].join("\n"),
+  );
 }
 
 async function main() {
