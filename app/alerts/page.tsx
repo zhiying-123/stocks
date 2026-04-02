@@ -110,19 +110,26 @@ async function fetchMarketSnapshotsByIds(marketIds: string[]) {
             if (!event?.markets || !Array.isArray(event.markets)) continue;
 
             for (const market of event.markets) {
-                const clobIds = parseStringArray(market?.clobTokenIds);
-                const tokenId = clobIds[0]?.trim() || String(market?.conditionId || "").trim();
-                if (!tokenId || !idSet.has(tokenId)) continue;
+                const conditionId = String(market?.conditionId || "").trim();
+                const clobIds = parseStringArray(market?.clobTokenIds)
+                    .map((id) => id.trim())
+                    .filter(Boolean);
+                const candidateIds = Array.from(new Set([conditionId, ...clobIds].filter(Boolean)));
+                const matchedIds = candidateIds.filter((id) => idSet.has(id));
+                if (matchedIds.length === 0) continue;
 
                 const pair = parseOutcomePrices(market?.outcomePrices);
                 const yesPricePercent = pair ? Number((pair[0] * 100).toFixed(2)) : null;
                 const noPricePercent = pair ? Number((pair[1] * 100).toFixed(2)) : null;
 
-                map.set(tokenId, {
-                    question: String(market?.question || event?.title || tokenId),
-                    yesPricePercent,
-                    noPricePercent,
-                });
+                const question = String(market?.question || event?.title || matchedIds[0]);
+                for (const id of matchedIds) {
+                    map.set(id, {
+                        question,
+                        yesPricePercent,
+                        noPricePercent,
+                    });
+                }
             }
         }
     } catch {

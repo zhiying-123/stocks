@@ -80,6 +80,7 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
     const [alertError, setAlertError] = useState('');
     const [alertMessage, setAlertMessage] = useState('');
     const [alertSubmitting, setAlertSubmitting] = useState(false);
+    const [alertCheckingNow, setAlertCheckingNow] = useState(false);
 
     // Sorting state
     const [sortBy, setSortBy] = useState('default');
@@ -319,6 +320,39 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
         } catch (error) {
             console.error('Failed to delete market alert:', error);
             setAlertError('Failed to delete alert');
+        }
+    };
+
+    const checkAlertsNowForMarket = async () => {
+        if (!alertMarket?.conditionId) return;
+
+        setAlertError('');
+        setAlertMessage('');
+        setAlertCheckingNow(true);
+
+        try {
+            const res = await fetch(`/api/polymarket/alerts/check?manual=1&marketId=${encodeURIComponent(alertMarket.conditionId)}`, {
+                method: 'GET',
+                cache: 'no-store',
+            });
+
+            const data = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+                setAlertError(data?.error || 'Failed to run alert check');
+                return;
+            }
+
+            const checked = Number(data?.checked || 0);
+            const triggered = Number(data?.triggered || 0);
+            const autoBuyExecuted = Number(data?.autoBuyExecuted || 0);
+            setAlertMessage(`Checked ${checked} alert(s), triggered ${triggered}, auto-buy executed ${autoBuyExecuted}.`);
+            await loadAlertsForMarket(alertMarket.conditionId);
+        } catch (error) {
+            console.error('Failed to run immediate alert check:', error);
+            setAlertError('Failed to run alert check');
+        } finally {
+            setAlertCheckingNow(false);
         }
     };
 
@@ -1112,7 +1146,7 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                         </label>
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                                <div className="grid grid-cols-[1fr_auto_auto] gap-2 items-end">
                                     <label className="block">
                                         <span className="block text-[11px] font-semibold text-gray-600 mb-1">Target Probability (%)</span>
                                         <input
@@ -1129,10 +1163,17 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
                                     </label>
                                     <button
                                         onClick={createAlertForMarket}
-                                        disabled={alertSubmitting}
+                                        disabled={alertSubmitting || alertCheckingNow}
                                         className="h-8 px-3 rounded-xl border border-gray-200 bg-gray-800 hover:bg-gray-900 text-white text-xs font-semibold disabled:opacity-50"
                                     >
                                         {alertSubmitting ? 'Saving...' : 'Save'}
+                                    </button>
+                                    <button
+                                        onClick={checkAlertsNowForMarket}
+                                        disabled={alertSubmitting || alertCheckingNow}
+                                        className="h-8 px-3 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold disabled:opacity-50"
+                                    >
+                                        {alertCheckingNow ? 'Checking...' : 'Check Now'}
                                     </button>
                                 </div>
                                 <div className="grid grid-cols-[auto_1fr] items-center gap-2 pt-1">

@@ -15,6 +15,10 @@ import {
     XAxis,
     YAxis,
     CartesianGrid,
+    AreaChart,
+    Area,
+    LineChart,
+    Line,
 } from 'recharts';
 
 interface Holding {
@@ -63,10 +67,12 @@ function parseStringArray(value: unknown): string[] {
 interface BacktestResult {
     config: {
         marketId: string;
-        action: 'BUY' | 'SELL';
+        action: 'BUY' | 'SELL' | 'BOTH';
         triggerType: 'PRICE_TARGET' | 'MOVING_AVERAGE';
         direction: 'ABOVE' | 'BELOW';
         targetPrice: number | null;
+        buyTargetPrice?: number | null;
+        sellTargetPrice?: number | null;
         movingAverageDays: number | null;
         quantity: number;
         start: string;
@@ -76,23 +82,47 @@ interface BacktestResult {
         mode: 'once' | 'repeat';
     };
     market: {
+        resolvedMarketId?: string;
         points: number;
         startDate: string;
         endDate: string;
         firstPrice: number;
         lastPrice: number;
+        lowPrice: number;
+        highPrice: number;
     };
     result: {
+        matchedSignals: number;
         tradesExecuted: number;
         matchedButSkipped: number;
+        buyTrades: number;
+        sellTrades: number;
+        totalBoughtCost: number;
+        totalBoughtQty: number;
+        totalSoldProceeds: number;
+        totalSoldQty: number;
         endingCash: number;
         endingPosition: number;
+        endingPositionValue: number;
+        realizedPnL: number;
+        unrealizedPnL: number;
+        tradingCashDelta: number;
+        positionMarkToMarketDelta: number;
         initialEquity: number;
         finalEquity: number;
         netPnL: number;
         returnPct: number;
+        buyAndHoldFinalEquity: number;
+        buyAndHoldNetPnL: number;
+        buyAndHoldReturnPct: number;
+        vsBuyAndHoldPct: number;
         maxDrawdownPct: number;
     };
+    skipReasonSummary?: Array<{
+        reason: string;
+        count: number;
+    }>;
+    insights?: string[];
     trades: Array<{
         date: string;
         action: 'BUY' | 'SELL';
@@ -138,6 +168,14 @@ function formatDateInput(daysAgo: number = 0) {
     return new Date(date.getTime() - timezoneOffsetMs).toISOString().slice(0, 10);
 }
 
+function formatFixed(value: unknown, digits: number) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return (0).toFixed(digits);
+    }
+    return numeric.toFixed(digits);
+}
+
 // Soft monochrome palette with very light accents
 const PASTEL_COLORS = ['#E5E7EB', '#D1D5DB', '#CBD5E1', '#E2E8F0', '#F1F5F9', '#E5E7EB', '#F3F4F6', '#D4D4D8'];
 
@@ -170,10 +208,12 @@ export default function PolymarketAnalyticsUI({
     const [fallbackMarketQuestion, setFallbackMarketQuestion] = useState('');
     const [marketQuery, setMarketQuery] = useState('');
     const [isMarketMenuOpen, setIsMarketMenuOpen] = useState(false);
-    const [action, setAction] = useState<'BUY' | 'SELL'>('BUY');
+    const [action, setAction] = useState<'BUY' | 'SELL' | 'BOTH'>('BOTH');
     const [triggerType, setTriggerType] = useState<'PRICE_TARGET' | 'MOVING_AVERAGE'>('PRICE_TARGET');
     const [direction, setDirection] = useState<'ABOVE' | 'BELOW'>('BELOW');
     const [targetPrice, setTargetPrice] = useState('0.55');
+    const [buyTargetPrice, setBuyTargetPrice] = useState('0.40');
+    const [sellTargetPrice, setSellTargetPrice] = useState('0.60');
     const [movingAverageDays, setMovingAverageDays] = useState('20');
     const [quantity, setQuantity] = useState('1');
     const [startDate, setStartDate] = useState(formatDateInput(365));
@@ -225,7 +265,7 @@ export default function PolymarketAnalyticsUI({
                         if (typeof market !== 'object' || market === null) continue;
                         const marketRecord = market as Record<string, unknown>;
                         const clobIds = parseStringArray(marketRecord.clobTokenIds);
-                        const tokenId = clobIds[0]?.trim() || String(marketRecord.conditionId || '').trim();
+                        const tokenId = String(marketRecord.conditionId || '').trim() || clobIds[0]?.trim();
                         if (!tokenId || map.has(tokenId)) continue;
 
                         const question = String(marketRecord.question || eventRecord.title || tokenId).trim();
@@ -439,12 +479,28 @@ export default function PolymarketAnalyticsUI({
                 throw new Error('End date cannot be earlier than start date');
             }
 
+            if (triggerType === 'PRICE_TARGET' && action === 'BOTH') {
+                const buyLine = Number(buyTargetPrice);
+                const sellLine = Number(sellTargetPrice);
+                if (!Number.isFinite(buyLine) || buyLine <= 0 || buyLine >= 1) {
+                    throw new Error('Buy line must be between 0 and 1');
+                }
+                if (!Number.isFinite(sellLine) || sellLine <= 0 || sellLine >= 1) {
+                    throw new Error('Sell line must be between 0 and 1');
+                }
+                if (buyLine >= sellLine) {
+                    throw new Error('Buy line must be lower than sell line');
+                }
+            }
+
             const payload = {
                 marketId: marketId.trim(),
                 action,
                 triggerType,
                 direction,
-                targetPrice: triggerType === 'PRICE_TARGET' ? Number(targetPrice) : null,
+                targetPrice: triggerType === 'PRICE_TARGET' && action !== 'BOTH' ? Number(targetPrice) : null,
+                buyTargetPrice: triggerType === 'PRICE_TARGET' && action === 'BOTH' ? Number(buyTargetPrice) : null,
+                sellTargetPrice: triggerType === 'PRICE_TARGET' && action === 'BOTH' ? Number(sellTargetPrice) : null,
                 movingAverageDays: triggerType === 'MOVING_AVERAGE' ? Number(movingAverageDays) : null,
                 quantity: Number(quantity),
                 start: startDate,
@@ -489,6 +545,63 @@ export default function PolymarketAnalyticsUI({
         void runBacktest();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [marketId, searchParams]);
+
+    const backtestTradeActionData = useMemo(() => {
+        if (!backtestResult) return [];
+        return [
+            { action: 'BUY', count: backtestResult.result.buyTrades || 0 },
+            { action: 'SELL', count: backtestResult.result.sellTrades || 0 },
+        ];
+    }, [backtestResult]);
+
+    const backtestExecutionPriceData = useMemo(() => {
+        if (!backtestResult) return [];
+
+        const bucket = new Map<string, {
+            date: string;
+            buyQty: number;
+            sellQty: number;
+            buyNotional: number;
+            sellNotional: number;
+        }>();
+
+        for (const trade of backtestResult.trades) {
+            const key = trade.date.slice(0, 10);
+            const row = bucket.get(key) || {
+                date: key,
+                buyQty: 0,
+                sellQty: 0,
+                buyNotional: 0,
+                sellNotional: 0,
+            };
+            if (trade.action === 'BUY') {
+                row.buyQty += Number(trade.quantity || 0);
+                row.buyNotional += Number(trade.price || 0) * Number(trade.quantity || 0);
+            } else {
+                row.sellQty += Number(trade.quantity || 0);
+                row.sellNotional += Number(trade.price || 0) * Number(trade.quantity || 0);
+            }
+            bucket.set(key, row);
+        }
+
+        return Array.from(bucket.values())
+            .sort((a, b) => a.date.localeCompare(b.date))
+            .map((row) => ({
+                date: row.date,
+                buyQty: row.buyQty,
+                sellQty: row.sellQty,
+                buyAvgPrice: row.buyQty > 0 ? row.buyNotional / row.buyQty : null,
+                sellAvgPrice: row.sellQty > 0 ? row.sellNotional / row.sellQty : null,
+            }))
+            .slice(-28);
+    }, [backtestResult]);
+
+    const conciseBacktestInsights = useMemo(() => {
+        if (!backtestResult?.insights) return [];
+        return backtestResult.insights
+            .slice(0, 4)
+            .map((line) => line.replace(/^Strategy\s+/i, '').replace(/^Signals\s+/i, 'Signals ').trim());
+    }, [backtestResult]);
 
     const backtestPanel = (
         <div className="bg-linear-to-b from-white to-gray-50 rounded-2xl border border-gray-200 shadow-sm p-6 space-y-5">
@@ -592,7 +705,8 @@ export default function PolymarketAnalyticsUI({
                 </div>
                 <div>
                     <label className="block text-xs font-semibold text-gray-500 mb-1">Action</label>
-                    <select value={action} onChange={(event) => setAction(event.target.value as 'BUY' | 'SELL')} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200">
+                    <select value={action} onChange={(event) => setAction(event.target.value as 'BUY' | 'SELL' | 'BOTH')} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200">
+                        <option value="BOTH">BOTH (Buy + Sell)</option>
                         <option value="BUY">BUY</option>
                         <option value="SELL">SELL</option>
                     </select>
@@ -606,17 +720,30 @@ export default function PolymarketAnalyticsUI({
                 </div>
                 <div>
                     <label className="block text-xs font-semibold text-gray-500 mb-1">Direction</label>
-                    <select value={direction} onChange={(event) => setDirection(event.target.value as 'ABOVE' | 'BELOW')} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200">
+                    <select value={direction} onChange={(event) => setDirection(event.target.value as 'ABOVE' | 'BELOW')} disabled={triggerType === 'PRICE_TARGET' && action === 'BOTH'} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:bg-gray-100 disabled:text-gray-500">
                         <option value="ABOVE">ABOVE</option>
                         <option value="BELOW">BELOW</option>
                     </select>
                 </div>
 
                 {triggerType === 'PRICE_TARGET' ? (
-                    <div>
-                        <label className="block text-xs font-semibold text-gray-500 mb-1">Target Price (0-1)</label>
-                        <input type="number" min="0" max="1" step="0.0001" value={targetPrice} onChange={(event) => setTargetPrice(event.target.value)} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200" />
-                    </div>
+                    action === 'BOTH' ? (
+                        <>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 mb-1">Buy Line (&lt;=)</label>
+                                <input type="number" min="0" max="1" step="0.0001" value={buyTargetPrice} onChange={(event) => setBuyTargetPrice(event.target.value)} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 mb-1">Sell Line (&gt;=)</label>
+                                <input type="number" min="0" max="1" step="0.0001" value={sellTargetPrice} onChange={(event) => setSellTargetPrice(event.target.value)} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200" />
+                            </div>
+                        </>
+                    ) : (
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1">Target Price (0-1)</label>
+                            <input type="number" min="0" max="1" step="0.0001" value={targetPrice} onChange={(event) => setTargetPrice(event.target.value)} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200" />
+                        </div>
+                    )
                 ) : (
                     <div>
                         <label className="block text-xs font-semibold text-gray-500 mb-1">MA Days</label>
@@ -696,7 +823,7 @@ export default function PolymarketAnalyticsUI({
                         </div>
                         <div className="flex items-center gap-2">
                             <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${backtestResult.result.netPnL >= 0 ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-rose-50 text-rose-600 border border-rose-100'}`}>
-                                PnL {backtestResult.result.netPnL >= 0 ? '+' : ''}{backtestResult.result.netPnL.toFixed(2)}
+                                PnL {backtestResult.result.netPnL >= 0 ? '+' : ''}{formatFixed(backtestResult.result.netPnL, 2)}
                             </span>
                             <button
                                 onClick={() => setIsReportModalOpen(true)}
@@ -734,62 +861,168 @@ export default function PolymarketAnalyticsUI({
                 </div>
 
                 <div className="max-h-[80vh] overflow-auto p-5 space-y-5">
-                    <div className="rounded-xl border border-gray-200 overflow-hidden">
-                        <table className="w-full text-sm">
-                            <thead className="bg-gray-50">
-                                <tr>
-                                    <th className="px-4 py-2.5 text-left font-semibold text-gray-600">Metric</th>
-                                    <th className="px-4 py-2.5 text-left font-semibold text-gray-600">Value</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Trades Executed</td><td className="px-4 py-2.5 font-semibold text-gray-900">{backtestResult.result.tradesExecuted}</td></tr>
-                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Return</td><td className="px-4 py-2.5 font-semibold text-gray-900">{backtestResult.result.returnPct.toFixed(2)}%</td></tr>
-                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Net PnL</td><td className={`px-4 py-2.5 font-semibold ${backtestResult.result.netPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{backtestResult.result.netPnL >= 0 ? '+' : ''}{backtestResult.result.netPnL.toFixed(2)}</td></tr>
-                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Max Drawdown</td><td className="px-4 py-2.5 font-semibold text-gray-900">{backtestResult.result.maxDrawdownPct.toFixed(2)}%</td></tr>
-                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Selected Range</td><td className="px-4 py-2.5 font-semibold text-gray-900">{backtestResult.config.start} → {backtestResult.config.end}</td></tr>
-                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Data Covered Range</td><td className="px-4 py-2.5 font-semibold text-gray-900">{backtestResult.market.startDate} → {backtestResult.market.endDate}</td></tr>
-                                <tr className="border-t border-gray-100"><td className="px-4 py-2.5 text-gray-600">Price Range</td><td className="px-4 py-2.5 font-semibold text-gray-900">{backtestResult.market.firstPrice.toFixed(4)} → {backtestResult.market.lastPrice.toFixed(4)}</td></tr>
-                            </tbody>
-                        </table>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                        <div className="rounded-xl border border-rose-100 bg-rose-50 p-4">
+                            <p className="text-[11px] uppercase tracking-wide font-semibold text-rose-500">Net PnL</p>
+                            <p className={`text-xl font-bold mt-1 ${backtestResult.result.netPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                {backtestResult.result.netPnL >= 0 ? '+' : ''}{formatFixed(backtestResult.result.netPnL, 2)}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">Return {formatFixed(backtestResult.result.returnPct, 2)}%</p>
+                        </div>
+                        <div className="rounded-xl border border-sky-100 bg-sky-50 p-4">
+                            <p className="text-[11px] uppercase tracking-wide font-semibold text-sky-600">Capital</p>
+                            <p className="text-lg font-bold text-gray-900 mt-1">{formatFixed(backtestResult.config.initialCash, 2)} start</p>
+                            <p className="text-xs text-gray-600 mt-1">Cash {formatFixed(backtestResult.result.endingCash, 2)} / Position {formatFixed(backtestResult.result.endingPositionValue, 2)}</p>
+                        </div>
+                        <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+                            <p className="text-[11px] uppercase tracking-wide font-semibold text-amber-600">Trades</p>
+                            <p className="text-lg font-bold text-gray-900 mt-1">{backtestResult.result.tradesExecuted} executed</p>
+                            <p className="text-xs text-gray-600 mt-1">BUY {backtestResult.result.buyTrades} / SELL {backtestResult.result.sellTrades}</p>
+                        </div>
+                        <div className="rounded-xl border border-violet-100 bg-violet-50 p-4">
+                            <p className="text-[11px] uppercase tracking-wide font-semibold text-violet-600">Risk</p>
+                            <p className="text-lg font-bold text-gray-900 mt-1">MDD {formatFixed(backtestResult.result.maxDrawdownPct, 2)}%</p>
+                            <p className="text-xs text-gray-600 mt-1">Vs B&H {formatFixed(backtestResult.result.vsBuyAndHoldPct, 2)} pp</p>
+                        </div>
                     </div>
 
-                    <div className="rounded-xl border border-gray-200 overflow-hidden">
-                        <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
-                            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Executed Trades</p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div className="rounded-xl border border-slate-200 bg-linear-to-br from-slate-50 to-white p-4">
+                            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Core Snapshot</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                    <p className="text-[10px] uppercase tracking-wide text-slate-400">Selected</p>
+                                    <p className="text-xs font-semibold text-slate-700 mt-1">{backtestResult.config.start} → {backtestResult.config.end}</p>
+                                </div>
+                                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                    <p className="text-[10px] uppercase tracking-wide text-slate-400">Covered</p>
+                                    <p className="text-xs font-semibold text-slate-700 mt-1">{backtestResult.market.startDate} → {backtestResult.market.endDate}</p>
+                                </div>
+                                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                    <p className="text-[10px] uppercase tracking-wide text-slate-400">Price Band</p>
+                                    <p className="text-xs font-semibold text-slate-700 mt-1">{formatFixed(backtestResult.market.lowPrice, 4)} ↔ {formatFixed(backtestResult.market.highPrice, 4)}</p>
+                                </div>
+                                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                    <p className="text-[10px] uppercase tracking-wide text-slate-400">PnL Split</p>
+                                    <p className="text-xs font-semibold text-slate-700 mt-1">R {formatFixed(backtestResult.result.realizedPnL, 2)} / U {formatFixed(backtestResult.result.unrealizedPnL, 2)}</p>
+                                </div>
+                                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 sm:col-span-2">
+                                    <p className="text-[10px] uppercase tracking-wide text-slate-400">Flow</p>
+                                    <p className="text-xs font-semibold text-slate-700 mt-1">Buy {formatFixed(backtestResult.result.totalBoughtCost, 2)} • Sell {formatFixed(backtestResult.result.totalSoldProceeds, 2)}</p>
+                                </div>
+                                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 sm:col-span-2">
+                                    <p className="text-[10px] uppercase tracking-wide text-slate-400">Resolved Market ID</p>
+                                    <p className="text-xs font-semibold text-slate-700 mt-1 break-all">{backtestResult.market.resolvedMarketId || backtestResult.config.marketId}</p>
+                                </div>
+                                {backtestResult.config.triggerType === 'PRICE_TARGET' && backtestResult.config.action === 'BOTH' ? (
+                                    <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 sm:col-span-2">
+                                        <p className="text-[10px] uppercase tracking-wide text-violet-500">Trigger Lines</p>
+                                        <p className="text-xs font-semibold text-violet-700 mt-1">BUY ≤ {formatFixed(backtestResult.config.buyTargetPrice, 4)} • SELL ≥ {formatFixed(backtestResult.config.sellTargetPrice, 4)}</p>
+                                    </div>
+                                ) : null}
+                            </div>
                         </div>
-                        <div className="max-h-72 overflow-auto">
-                            {backtestResult.trades.length === 0 ? (
-                                <div className="px-4 py-6 text-sm text-gray-500">No trades executed for selected parameters.</div>
-                            ) : (
-                                <table className="w-full text-sm">
-                                    <thead className="bg-white border-b border-gray-100 sticky top-0">
-                                        <tr>
-                                            <th className="text-left px-4 py-2 font-semibold text-gray-500">Date</th>
-                                            <th className="text-left px-4 py-2 font-semibold text-gray-500">Action</th>
-                                            <th className="text-left px-4 py-2 font-semibold text-gray-500">Price</th>
-                                            <th className="text-left px-4 py-2 font-semibold text-gray-500">Qty</th>
-                                            <th className="text-left px-4 py-2 font-semibold text-gray-500">Trigger</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {backtestResult.trades.map((trade, index) => (
-                                            <tr key={`${trade.date}-${index}`} className="border-b border-gray-50 last:border-b-0">
-                                                <td className="px-4 py-2 text-gray-700">{trade.date}</td>
-                                                <td className="px-4 py-2">
-                                                    <span className={`inline-flex px-2 py-0.5 text-xs font-bold rounded-full ${trade.action === 'BUY' ? 'bg-sky-50 text-sky-600 border border-sky-100' : 'bg-orange-50 text-orange-600 border border-orange-100'}`}>
-                                                        {trade.action}
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-2 text-gray-700">{trade.price.toFixed(4)}</td>
-                                                <td className="px-4 py-2 text-gray-700">{trade.quantity}</td>
-                                                <td className="px-4 py-2 text-gray-700">{trade.triggerValue.toFixed(4)}</td>
-                                            </tr>
+                        <div className="rounded-xl border border-indigo-100 bg-linear-to-br from-indigo-50 to-white p-4">
+                            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Trade Mix</p>
+                            <ResponsiveContainer width="100%" height={180}>
+                                <PieChart>
+                                    <Pie
+                                        data={backtestTradeActionData}
+                                        dataKey="count"
+                                        nameKey="action"
+                                        cx="50%"
+                                        cy="50%"
+                                        innerRadius={48}
+                                        outerRadius={76}
+                                        paddingAngle={4}
+                                        strokeWidth={0}
+                                    >
+                                        <Cell fill="#93C5FD" />
+                                        <Cell fill="#FDBA74" />
+                                    </Pie>
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: 'white',
+                                            border: '1px solid #e5e7eb',
+                                            borderRadius: '10px',
+                                        }}
+                                        formatter={(value: number | undefined, name: string) => [value || 0, `${name} trades`]}
+                                    />
+                                    <Legend wrapperStyle={{ fontSize: '12px' }} />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+
+                    {(backtestResult.insights?.length || backtestResult.skipReasonSummary?.length) ? (
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div className="rounded-xl border border-emerald-100 bg-linear-to-br from-emerald-50 to-white p-4">
+                                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Why Profit / Loss</p>
+                                <div className="flex flex-wrap gap-2">
+                                    {conciseBacktestInsights.length === 0 ? (
+                                        <p className="text-sm text-gray-500">No insights generated.</p>
+                                    ) : conciseBacktestInsights.map((insight, index) => (
+                                        <span key={`${index}-${insight.slice(0, 14)}`} className="inline-flex rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700">
+                                            {insight}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="rounded-xl border border-amber-100 bg-linear-to-br from-amber-50 to-white p-4">
+                                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Top Skipped Reasons</p>
+                                {(backtestResult.skipReasonSummary || []).length === 0 ? (
+                                    <p className="text-sm text-gray-500">No skipped signals.</p>
+                                ) : (
+                                    <ul className="space-y-2">
+                                        {(backtestResult.skipReasonSummary || []).map((row) => (
+                                            <li key={row.reason} className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-amber-700 font-medium">{row.reason}: {row.count}</li>
                                         ))}
-                                    </tbody>
-                                </table>
-                            )}
+                                    </ul>
+                                )}
+                            </div>
                         </div>
+                    ) : null}
+
+                    <div className="rounded-xl border border-cyan-100 bg-linear-to-br from-cyan-50 to-white p-4">
+                        <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Execution Price Timeline (Last 28 Buckets)</p>
+                        <p className="text-[11px] text-gray-500 mb-3">X-axis: date, Y-axis: average executed price. Tooltip shows quantity details.</p>
+                        {backtestExecutionPriceData.length === 0 ? (
+                            <p className="text-sm text-gray-500">No trades executed for selected parameters.</p>
+                        ) : (
+                            <ResponsiveContainer width="100%" height={220}>
+                                <LineChart data={backtestExecutionPriceData}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6B7280' }} />
+                                    <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} domain={[0, 1]} />
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: 'white',
+                                            border: '1px solid #e5e7eb',
+                                            borderRadius: '10px',
+                                        }}
+                                        formatter={(value: number | undefined, name: string, props: any) => {
+                                            const payload = props?.payload || {};
+                                            if (name === 'BUY Avg Price') {
+                                                return [
+                                                    value != null ? `${formatFixed(value, 4)} (qty ${formatFixed(payload.buyQty, 2)})` : 'N/A',
+                                                    name,
+                                                ];
+                                            }
+                                            if (name === 'SELL Avg Price') {
+                                                return [
+                                                    value != null ? `${formatFixed(value, 4)} (qty ${formatFixed(payload.sellQty, 2)})` : 'N/A',
+                                                    name,
+                                                ];
+                                            }
+                                            return [value ?? 'N/A', name];
+                                        }}
+                                    />
+                                    <Legend wrapperStyle={{ fontSize: '12px' }} />
+                                    <Line type="monotone" dataKey="buyAvgPrice" stroke="#3B82F6" strokeWidth={2.5} dot={{ r: 3 }} connectNulls name="BUY Avg Price" />
+                                    <Line type="monotone" dataKey="sellAvgPrice" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 3 }} connectNulls name="SELL Avg Price" />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        )}
                     </div>
                 </div>
             </div>

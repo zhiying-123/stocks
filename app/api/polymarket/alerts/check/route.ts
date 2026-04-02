@@ -33,6 +33,19 @@ type AutoBuyFieldRow = {
     alert_tag: string | null;
 };
 
+function getUserIdFromCookie(req: NextRequest): number | null {
+    const raw = req.cookies.get("user")?.value;
+    if (!raw) return null;
+
+    try {
+        const parsed = JSON.parse(raw);
+        const userId = Number(parsed?.id);
+        return Number.isInteger(userId) && userId > 0 ? userId : null;
+    } catch {
+        return null;
+    }
+}
+
 function parseNotifyChannels(value: string | null | undefined): AlertNotifyChannel[] {
     if (!value) return ["EMAIL", "DISCORD"];
     const normalized = Array.from(
@@ -129,15 +142,22 @@ async function fetchPriceMap(requiredMarketIds: Set<string>) {
 
                 const [yesPrice, noPrice] = parsedPrices;
 
-                const clobIds = parseStringArray(market?.clobTokenIds);
-                const tokenId = clobIds[0]?.trim() || String(market?.conditionId || "").trim();
-                if (!tokenId || !requiredMarketIds.has(tokenId)) continue;
+                const conditionId = String(market?.conditionId || "").trim();
+                const clobIds = parseStringArray(market?.clobTokenIds)
+                    .map((id) => id.trim())
+                    .filter(Boolean);
+                const candidateIds = Array.from(new Set([conditionId, ...clobIds].filter(Boolean)));
+                const matchedIds = candidateIds.filter((id) => requiredMarketIds.has(id));
+                if (matchedIds.length === 0) continue;
 
-                priceMap.set(tokenId, {
-                    yes: yesPrice,
-                    no: noPrice,
-                    question: String(market?.question || event?.title || tokenId),
-                });
+                const question = String(market?.question || event?.title || matchedIds[0]);
+                for (const id of matchedIds) {
+                    priceMap.set(id, {
+                        yes: yesPrice,
+                        no: noPrice,
+                        question,
+                    });
+                }
             }
         }
 
@@ -387,12 +407,18 @@ async function createLinkedTpSlAlerts({
 
 export async function GET(req: NextRequest) {
     try {
+        const manualMode = req.nextUrl.searchParams.get("manual") === "1";
+        const manualMarketId = req.nextUrl.searchParams.get("marketId")?.trim() || null;
+        const manualUserId = getUserIdFromCookie(req);
+
         const acceptedSecrets = Array.from(
             new Set([
                 process.env.POLYMARKET_ALERT_CRON_SECRET,
                 process.env.CRON_SECRET,
             ].filter((value): value is string => Boolean(value && value.trim())))
         );
+        let scopedUserId: number | null = null;
+
         if (acceptedSecrets.length > 0) {
             const headerSecret = req.headers.get("x-cron-secret");
             const authHeader = req.headers.get("authorization") || "";
@@ -401,12 +427,29 @@ export async function GET(req: NextRequest) {
             const providedSecrets = [headerSecret, querySecret, bearerSecret].filter((value): value is string => Boolean(value && value.trim()));
             const matched = providedSecrets.some((provided) => acceptedSecrets.includes(provided));
             if (!matched) {
-                return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+                if (manualMode && manualUserId) {
+                    scopedUserId = manualUserId;
+                } else {
+                    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+                }
             }
+        } else if (manualMode) {
+            if (!manualUserId) {
+                return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+            }
+            scopedUserId = manualUserId;
+        }
+
+        const alertWhere: { is_active: boolean; u_id?: number; market_id?: string } = { is_active: true };
+        if (scopedUserId) {
+            alertWhere.u_id = scopedUserId;
+        }
+        if (manualMarketId) {
+            alertWhere.market_id = manualMarketId;
         }
 
         const activeAlerts = await prisma.polymarketPriceAlert.findMany({
-            where: { is_active: true },
+            where: alertWhere,
             orderBy: { created_at: "asc" },
         });
 
@@ -426,7 +469,9 @@ export async function GET(req: NextRequest) {
                 "parent_alert_id",
                 "alert_tag"
             FROM "PolymarketPriceAlert"
-            WHERE "is_active" = true
+                        WHERE "is_active" = true
+                            AND (${scopedUserId}::int IS NULL OR "u_id" = ${scopedUserId})
+                            AND (${manualMarketId}::text IS NULL OR "market_id" = ${manualMarketId})
         `;
         const autoBuyMap = new Map(autoBuyRows.map((row) => [row.alert_id, row]));
 

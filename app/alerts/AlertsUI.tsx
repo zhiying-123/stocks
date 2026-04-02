@@ -114,6 +114,7 @@ export default function AlertsUI({
     const [autoBuyModalSlPercent, setAutoBuyModalSlPercent] = useState('');
     const [autoBuyModalLoading, setAutoBuyModalLoading] = useState(false);
     const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+    const [runAllLoading, setRunAllLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
@@ -460,6 +461,66 @@ export default function AlertsUI({
         }
     }
 
+    async function refreshPolymarketAlerts() {
+        const res = await fetch('/api/polymarket/alerts', {
+            method: 'GET',
+            cache: 'no-store',
+        });
+
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !Array.isArray(data?.alerts)) {
+            throw new Error(data?.error || 'Failed to refresh alerts');
+        }
+
+        setAlerts((prev) => {
+            const prevMap = new Map(prev.map((item) => [item.alert_id, item]));
+            return data.alerts.map((item: PolymarketAlert) => {
+                const prevItem = prevMap.get(item.alert_id);
+                return {
+                    ...item,
+                    market_question: prevItem?.market_question || item.market_id,
+                    current_yes_percent: prevItem?.current_yes_percent ?? null,
+                    current_no_percent: prevItem?.current_no_percent ?? null,
+                };
+            });
+        });
+    }
+
+    async function runAllPolymarketAlertsNow() {
+        setError('');
+        setSuccess('');
+        setRunAllLoading(true);
+
+        try {
+            const res = await fetch('/api/polymarket/alerts/check?manual=1', {
+                method: 'GET',
+                cache: 'no-store',
+            });
+
+            const data = await res.json().catch(() => null);
+            if (!res.ok) {
+                setError(data?.error || 'Failed to run all alerts check');
+                return;
+            }
+
+            await refreshPolymarketAlerts();
+
+            const checked = Number(data?.checked || 0);
+            const triggered = Number(data?.triggered || 0);
+            const autoBuyExecuted = Number(data?.autoBuyExecuted || 0);
+            const autoBuyFailed = Number(data?.autoBuyFailed || 0);
+
+            setSuccess(
+                `Check completed: checked ${checked}, triggered ${triggered}, auto-buy executed ${autoBuyExecuted}, auto-buy failed ${autoBuyFailed}.`
+            );
+        } catch (err) {
+            console.error('Failed to run all alerts check:', err);
+            setError(err instanceof Error ? err.message : 'Failed to run all alerts check');
+        } finally {
+            setRunAllLoading(false);
+        }
+    }
+
     return (
         <div className="max-w-360 mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
             <div>
@@ -514,12 +575,21 @@ export default function AlertsUI({
                             <span className="text-lg">🎲</span>
                             <h2 className="text-lg font-bold text-gray-900">Polymarket Alerts</h2>
                         </div>
-                        <Link
-                            href="/polymarket"
-                            className="h-8 px-3 rounded-xl border border-gray-200 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold flex items-center"
-                        >
-                            Set New Alert
-                        </Link>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={runAllPolymarketAlertsNow}
+                                disabled={runAllLoading || actionLoadingId !== null}
+                                className="h-8 px-3 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold disabled:opacity-50"
+                            >
+                                {runAllLoading ? 'Running...' : 'Run All Now'}
+                            </button>
+                            <Link
+                                href="/polymarket"
+                                className="h-8 px-3 rounded-xl border border-gray-200 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold flex items-center"
+                            >
+                                Set New Alert
+                            </Link>
+                        </div>
                     </div>
 
                     {error && <p className="text-xs text-red-600">{error}</p>}

@@ -62,14 +62,17 @@ async function main() {
         const pair = parsePair(market?.outcomePrices);
         if (!pair) continue;
 
-        const clobIds = parseStringArray(market?.clobTokenIds);
-        const tokenId = clobIds[0]?.trim() || String(market?.conditionId || "").trim();
-        if (tokenId !== alert.market_id) continue;
+        const conditionId = String(market?.conditionId || "").trim();
+        const clobIds = parseStringArray(market?.clobTokenIds)
+          .map((id) => id.trim())
+          .filter(Boolean);
+        const candidateIds = new Set([conditionId, ...clobIds].filter(Boolean));
+        if (!candidateIds.has(alert.market_id)) continue;
 
         marketFound = {
           yes: pair[0],
           no: pair[1],
-          question: String(market?.question || event?.title || tokenId),
+          question: String(market?.question || event?.title || alert.market_id),
         };
         break;
       }
