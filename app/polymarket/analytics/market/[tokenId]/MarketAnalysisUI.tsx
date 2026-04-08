@@ -118,8 +118,8 @@ export default function MarketAnalysisUI({ tokenId }: { tokenId: string }) {
         const now = Date.now();
         const lookbackMs =
             timeRange === '1W' ? 7 * 24 * 60 * 60 * 1000 :
-            timeRange === '1M' ? 30 * 24 * 60 * 60 * 1000 :
-            90 * 24 * 60 * 60 * 1000;
+                timeRange === '1M' ? 30 * 24 * 60 * 60 * 1000 :
+                    90 * 24 * 60 * 60 * 1000;
 
         const cutoff = now - lookbackMs;
         const sliced = normalizedHistory.filter((item) => item.time.getTime() >= cutoff);
