@@ -29,14 +29,29 @@ type AutoBuyFieldRow = {
 
 function parseStringArray(value: unknown): string[] {
     if (!value) return [];
-    if (Array.isArray(value)) return value.map((v) => String(v));
+    if (Array.isArray(value)) {
+        return value
+            .map((v) => String(v).trim())
+            .filter(Boolean);
+    }
     if (typeof value === "string") {
-        try {
-            const parsed = JSON.parse(value);
-            return Array.isArray(parsed) ? parsed.map((v) => String(v)) : [];
-        } catch {
-            return [];
+        const raw = value.trim();
+        if (!raw) return [];
+
+        const quotedTokens = Array.from(raw.matchAll(/"([^\"]+)"/g)).map((m) => m[1].trim()).filter(Boolean);
+        if (quotedTokens.length > 0) return quotedTokens;
+
+        const numericTokens = Array.from(raw.matchAll(/\d+/g)).map((m) => m[0].trim()).filter(Boolean);
+        if (numericTokens.length > 0) return numericTokens;
+
+        if (raw.includes(",")) {
+            return raw
+                .split(",")
+                .map((part) => part.trim())
+                .filter(Boolean);
         }
+
+        return [raw];
     }
     return [];
 }
@@ -90,50 +105,101 @@ async function fetchMarketSnapshotsByIds(marketIds: string[]) {
     }
 
     try {
-        const response = await fetch(`${POLYMARKET_API}/events?limit=500&offset=0&closed=false`, {
-            cache: "no-store",
-            headers: {
-                Accept: "application/json",
-            },
-        });
+        for (const closed of ["false", "true"]) {
+            for (let offset = 0; offset <= 2000; offset += 500) {
+                const response = await fetch(`${POLYMARKET_API}/events?limit=500&offset=${offset}&closed=${closed}`, {
+                    cache: "no-store",
+                    headers: {
+                        Accept: "application/json",
+                    },
+                });
 
-        if (!response.ok) {
-            return map;
-        }
+                if (!response.ok) {
+                    break;
+                }
 
-        const events = await response.json();
-        if (!Array.isArray(events)) {
-            return map;
-        }
+                const events = await response.json();
+                if (!Array.isArray(events) || events.length === 0) {
+                    break;
+                }
 
-        for (const event of events) {
-            if (!event?.markets || !Array.isArray(event.markets)) continue;
+                for (const event of events) {
+                    if (!event?.markets || !Array.isArray(event.markets)) continue;
 
-            for (const market of event.markets) {
-                const conditionId = String(market?.conditionId || "").trim();
-                const clobIds = parseStringArray(market?.clobTokenIds)
-                    .map((id) => id.trim())
-                    .filter(Boolean);
-                const candidateIds = Array.from(new Set([conditionId, ...clobIds].filter(Boolean)));
-                const matchedIds = candidateIds.filter((id) => idSet.has(id));
-                if (matchedIds.length === 0) continue;
+                    for (const market of event.markets) {
+                        const conditionId = String(market?.conditionId || "").trim();
+                        const clobIds = parseStringArray(market?.clobTokenIds)
+                            .map((id) => id.trim())
+                            .filter(Boolean);
+                        const marketId = String(market?.id || "").trim();
+                        const candidateIds = Array.from(new Set([conditionId, marketId, ...clobIds].filter(Boolean)));
+                        const matchedIds = candidateIds.filter((id) => idSet.has(id));
+                        if (matchedIds.length === 0) continue;
 
-                const pair = parseOutcomePrices(market?.outcomePrices);
-                const yesPricePercent = pair ? Number((pair[0] * 100).toFixed(2)) : null;
-                const noPricePercent = pair ? Number((pair[1] * 100).toFixed(2)) : null;
+                        const pair = parseOutcomePrices(market?.outcomePrices);
+                        const yesPricePercent = pair ? Number((pair[0] * 100).toFixed(2)) : null;
+                        const noPricePercent = pair ? Number((pair[1] * 100).toFixed(2)) : null;
 
-                const question = String(market?.question || event?.title || matchedIds[0]);
-                for (const id of matchedIds) {
-                    map.set(id, {
-                        question,
-                        yesPricePercent,
-                        noPricePercent,
-                    });
+                        const question = String(market?.question || event?.title || matchedIds[0]);
+                        for (const id of matchedIds) {
+                            map.set(id, {
+                                question,
+                                yesPricePercent,
+                                noPricePercent,
+                            });
+                        }
+                    }
+                }
+
+                if (map.size >= idSet.size) {
+                    return map;
+                }
+
+                if (events.length < 500) {
+                    break;
                 }
             }
         }
     } catch {
-        return map;
+        // Fall through to direct lookup below.
+    }
+
+    for (const id of idSet) {
+        if (map.has(id)) continue;
+        try {
+            const response = await fetch(`${POLYMARKET_API}/markets/${encodeURIComponent(id)}`, {
+                cache: "no-store",
+                headers: {
+                    Accept: "application/json",
+                },
+            });
+
+            if (!response.ok) continue;
+
+            const market = await response.json();
+            const pair = parseOutcomePrices(market?.outcomePrices);
+            const yesPricePercent = pair ? Number((pair[0] * 100).toFixed(2)) : null;
+            const noPricePercent = pair ? Number((pair[1] * 100).toFixed(2)) : null;
+            const question = String(market?.question || market?.title || id);
+
+            const conditionId = String(market?.conditionId || "").trim();
+            const clobIds = parseStringArray(market?.clobTokenIds)
+                .map((tokenId) => tokenId.trim())
+                .filter(Boolean);
+            const marketId = String(market?.id || "").trim();
+            const candidateIds = Array.from(new Set([id, conditionId, marketId, ...clobIds].filter(Boolean)));
+
+            for (const candidateId of candidateIds) {
+                if (!idSet.has(candidateId)) continue;
+                map.set(candidateId, {
+                    question,
+                    yesPricePercent,
+                    noPricePercent,
+                });
+            }
+        } catch {
+            continue;
+        }
     }
 
     return map;

@@ -6,6 +6,35 @@ import PolymarketUI from "./polymarketUI";
 
 const POLYMARKET_API = "https://gamma-api.polymarket.com";
 
+function parseTokenIdArray(value: unknown): string[] {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+        return value
+            .map((item) => String(item).trim())
+            .filter(Boolean);
+    }
+    if (typeof value === "string") {
+        const raw = value.trim();
+        if (!raw) return [];
+
+        const quotedTokens = Array.from(raw.matchAll(/"([^\"]+)"/g)).map((m) => m[1].trim()).filter(Boolean);
+        if (quotedTokens.length > 0) return quotedTokens;
+
+        const numericTokens = Array.from(raw.matchAll(/\d+/g)).map((m) => m[0].trim()).filter(Boolean);
+        if (numericTokens.length > 0) return numericTokens;
+
+        if (raw.includes(",")) {
+            return raw
+                .split(",")
+                .map((part) => part.trim())
+                .filter(Boolean);
+        }
+
+        return [raw];
+    }
+    return [];
+}
+
 async function getAuthState() {
     const cookieStore = await cookies();
     const isLoggedIn = cookieStore.get("auth")?.value === "true";
@@ -63,11 +92,8 @@ async function fetchMarkets() {
                 const category = tags.length > 0 && tags[0].label ? tags[0].label : "Other";
                 const tagLabels = tags.map((tag: any) => tag.label || tag).filter(Boolean);
 
-                // Parse clobTokenIds (may be JSON string)
-                let clobIds = market.clobTokenIds;
-                if (typeof clobIds === 'string') {
-                    try { clobIds = JSON.parse(clobIds); } catch { clobIds = []; }
-                }
+                // Parse token ids without converting huge integers to JS numbers.
+                const clobIds = parseTokenIdArray(market.clobTokenIds);
 
                 allMarkets.push({
                     id: market.id || market.conditionId || `market-${Math.random()}`,
@@ -83,7 +109,7 @@ async function fetchMarkets() {
                     liquidity: market.liquidity ? parseFloat(market.liquidity) : 0,
                     category: category,
                     tags: tagLabels,
-                    conditionId: clobIds?.[0]?.trim() || market.conditionId || "",
+                    conditionId: clobIds[0]?.trim() || market.conditionId || "",
                 });
             }
         }

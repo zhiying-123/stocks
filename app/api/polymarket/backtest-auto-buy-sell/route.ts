@@ -135,12 +135,47 @@ async function fetchHistoryForMarketId(marketId: string): Promise<PricePoint[]> 
   return normalizePriceHistory(raw);
 }
 
+async function resolveFromDirectMarketLookup(inputId: string): Promise<string | null> {
+  const target = inputId.trim();
+  if (!target) return null;
+
+  try {
+    const response = await fetch(`${GAMMA_API}/markets/${encodeURIComponent(target)}`, {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const market = (await response.json()) as unknown;
+    if (!isRecord(market)) return null;
+
+    const clobIds = parseStringArray(market.clobTokenIds).map((id) => id.trim()).filter(Boolean);
+    if (clobIds.includes(target)) return target;
+    if (clobIds.length > 0) return clobIds[0];
+
+    const conditionId = String(market.conditionId || "").trim();
+    if (conditionId === target) return target;
+  } catch {
+    // Fall through to event-scan resolver.
+  }
+
+  return null;
+}
+
 async function resolveClobTokenId(inputId: string): Promise<string | null> {
   const target = inputId.trim();
   if (!target) return null;
 
+  const directResolved = await resolveFromDirectMarketLookup(target);
+  if (directResolved) {
+    return directResolved;
+  }
+
   for (const closed of ["false", "true"]) {
-    for (let offset = 0; offset <= 1000; offset += 500) {
+    for (let offset = 0; offset <= 5000; offset += 500) {
       try {
         const response = await fetch(`${GAMMA_API}/events?limit=500&offset=${offset}&closed=${closed}`, {
           cache: "no-store",

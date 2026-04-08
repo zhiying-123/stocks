@@ -140,6 +140,8 @@ interface BacktestResult {
     }>;
 }
 
+type BacktestWindowPreset = '1W' | '1M' | '3M';
+
 type CategoryDatum = {
     name: string;
     value: number;
@@ -168,12 +170,27 @@ function formatDateInput(daysAgo: number = 0) {
     return new Date(date.getTime() - timezoneOffsetMs).toISOString().slice(0, 10);
 }
 
+function getPresetStartDate(preset: BacktestWindowPreset) {
+    if (preset === '1W') return formatDateInput(7);
+    if (preset === '3M') return formatDateInput(90);
+    return formatDateInput(30);
+}
+
 function formatFixed(value: unknown, digits: number) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) {
         return (0).toFixed(digits);
     }
     return numeric.toFixed(digits);
+}
+
+function escapeHtml(value: string) {
+    return value
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
 }
 
 // Soft monochrome palette with very light accents
@@ -216,7 +233,8 @@ export default function PolymarketAnalyticsUI({
     const [sellTargetPrice, setSellTargetPrice] = useState('0.60');
     const [movingAverageDays, setMovingAverageDays] = useState('20');
     const [quantity, setQuantity] = useState('1');
-    const [startDate, setStartDate] = useState(formatDateInput(365));
+    const [windowPreset, setWindowPreset] = useState<BacktestWindowPreset>('1M');
+    const [startDate, setStartDate] = useState(getPresetStartDate('1M'));
     const [endDate, setEndDate] = useState(today);
     const [initialCash, setInitialCash] = useState('1000');
     const [initialPosition, setInitialPosition] = useState('0');
@@ -225,6 +243,9 @@ export default function PolymarketAnalyticsUI({
     const [backtestError, setBacktestError] = useState('');
     const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
     const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+    const [shareChannels, setShareChannels] = useState<Array<'WHATSAPP' | 'DISCORD'>>(['WHATSAPP']);
+    const [isSharingBacktestReport, setIsSharingBacktestReport] = useState(false);
+    const [shareStatusMessage, setShareStatusMessage] = useState('');
 
     useEffect(() => {
         setAvailableMarketOptions(marketOptions);
@@ -265,7 +286,7 @@ export default function PolymarketAnalyticsUI({
                         if (typeof market !== 'object' || market === null) continue;
                         const marketRecord = market as Record<string, unknown>;
                         const clobIds = parseStringArray(marketRecord.clobTokenIds);
-                        const tokenId = String(marketRecord.conditionId || '').trim() || clobIds[0]?.trim();
+                        const tokenId = clobIds[0]?.trim() || String(marketRecord.conditionId || '').trim() || String(marketRecord.id || '').trim();
                         if (!tokenId || map.has(tokenId)) continue;
 
                         const question = String(marketRecord.question || eventRecord.title || tokenId).trim();
@@ -301,6 +322,13 @@ export default function PolymarketAnalyticsUI({
             setMarketQuery(availableMarketOptions[0].question);
         }
     }, [availableMarketOptions, marketId]);
+
+    useEffect(() => {
+        const nextEnd = today;
+        const nextStart = getPresetStartDate(windowPreset);
+        setStartDate(nextStart);
+        setEndDate(nextEnd);
+    }, [today, windowPreset]);
 
     useEffect(() => {
         if (!isReportModalOpen) {
@@ -546,56 +574,6 @@ export default function PolymarketAnalyticsUI({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [marketId, searchParams]);
 
-    const backtestTradeActionData = useMemo(() => {
-        if (!backtestResult) return [];
-        return [
-            { action: 'BUY', count: backtestResult.result.buyTrades || 0 },
-            { action: 'SELL', count: backtestResult.result.sellTrades || 0 },
-        ];
-    }, [backtestResult]);
-
-    const backtestExecutionPriceData = useMemo(() => {
-        if (!backtestResult) return [];
-
-        const bucket = new Map<string, {
-            date: string;
-            buyQty: number;
-            sellQty: number;
-            buyNotional: number;
-            sellNotional: number;
-        }>();
-
-        for (const trade of backtestResult.trades) {
-            const key = trade.date.slice(0, 10);
-            const row = bucket.get(key) || {
-                date: key,
-                buyQty: 0,
-                sellQty: 0,
-                buyNotional: 0,
-                sellNotional: 0,
-            };
-            if (trade.action === 'BUY') {
-                row.buyQty += Number(trade.quantity || 0);
-                row.buyNotional += Number(trade.price || 0) * Number(trade.quantity || 0);
-            } else {
-                row.sellQty += Number(trade.quantity || 0);
-                row.sellNotional += Number(trade.price || 0) * Number(trade.quantity || 0);
-            }
-            bucket.set(key, row);
-        }
-
-        return Array.from(bucket.values())
-            .sort((a, b) => a.date.localeCompare(b.date))
-            .map((row) => ({
-                date: row.date,
-                buyQty: row.buyQty,
-                sellQty: row.sellQty,
-                buyAvgPrice: row.buyQty > 0 ? row.buyNotional / row.buyQty : null,
-                sellAvgPrice: row.sellQty > 0 ? row.sellNotional / row.sellQty : null,
-            }))
-            .slice(-28);
-    }, [backtestResult]);
-
     const conciseBacktestInsights = useMemo(() => {
         if (!backtestResult?.insights) return [];
         return backtestResult.insights
@@ -603,23 +581,201 @@ export default function PolymarketAnalyticsUI({
             .map((line) => line.replace(/^Strategy\s+/i, '').replace(/^Signals\s+/i, 'Signals ').trim());
     }, [backtestResult]);
 
+    const reportTitle = useMemo(() => {
+        if (!backtestResult) return '';
+        return `Backtest Performance Report - ${selectedMarketLabel}`;
+    }, [backtestResult, selectedMarketLabel]);
+
+    const reportLines = useMemo(() => {
+        if (!backtestResult) return '';
+
+        const insights = conciseBacktestInsights.length > 0
+            ? conciseBacktestInsights.slice(0, 3).join(' | ')
+            : 'No notable strategy notes generated.';
+
+        const reportGeneratedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+        const lines = [
+            `Generated At (UTC): ${reportGeneratedAt}`,
+            `Market: ${selectedMarketLabel}`,
+            `Window: ${backtestResult.config.start} to ${backtestResult.config.end}`,
+            `Strategy: Action ${backtestResult.config.action}, Trigger ${backtestResult.config.triggerType}, Mode ${backtestResult.config.mode}`,
+            `Execution Inputs: Quantity ${formatFixed(backtestResult.config.quantity, 2)}, Initial Cash ${formatFixed(backtestResult.config.initialCash, 2)}, Initial Position ${formatFixed(backtestResult.config.initialPosition, 2)}`,
+            `Performance: Net PnL ${backtestResult.result.netPnL >= 0 ? '+' : ''}${formatFixed(backtestResult.result.netPnL, 2)}, Return ${formatFixed(backtestResult.result.returnPct, 2)}%, Final Equity ${formatFixed(backtestResult.result.finalEquity, 2)}`,
+            `Risk & Benchmark: Max Drawdown ${formatFixed(backtestResult.result.maxDrawdownPct, 2)}%, Vs Buy and Hold ${formatFixed(backtestResult.result.vsBuyAndHoldPct, 2)} pp`,
+            `Trade Summary: Executed ${backtestResult.result.tradesExecuted}, BUY ${backtestResult.result.buyTrades}, SELL ${backtestResult.result.sellTrades}, Matched ${backtestResult.result.matchedSignals}, Skipped ${backtestResult.result.matchedButSkipped}`,
+            `Market Coverage: ${backtestResult.market.points} points, Price Range ${formatFixed(backtestResult.market.lowPrice, 4)} to ${formatFixed(backtestResult.market.highPrice, 4)}`,
+            `Analyst Notes: ${insights}`,
+        ];
+
+        return lines;
+    }, [backtestResult, conciseBacktestInsights, selectedMarketLabel]);
+
+    const reportShareMessage = useMemo(() => {
+        if (!backtestResult || !reportTitle) return '';
+        return [reportTitle, ...reportLines.map((line) => `- ${line}`)].join('\n');
+    }, [backtestResult, reportLines, reportTitle]);
+
+    function downloadBacktestPdf() {
+        if (!backtestResult) return;
+
+        const popup = window.open('', '_blank');
+        if (!popup) {
+            setShareStatusMessage('Popup blocked. Please allow popups, then try Download PDF again.');
+            return;
+        }
+
+        const tradeRows = backtestResult.trades
+            .slice(-20)
+            .reverse()
+            .map((trade, index) => `
+                                <tr>
+                                        <td>${index + 1}</td>
+                                        <td>${escapeHtml(trade.date)}</td>
+                                        <td>${escapeHtml(trade.action)}</td>
+                                        <td>${formatFixed(trade.price, 4)}</td>
+                                        <td>${formatFixed(trade.quantity, 2)}</td>
+                                        <td>${formatFixed(trade.cashAfter, 2)}</td>
+                                        <td>${formatFixed(trade.positionAfter, 2)}</td>
+                                </tr>
+                        `)
+            .join('');
+
+        const notesRows = reportLines
+            .map((line) => `<li>${escapeHtml(line)}</li>`)
+            .join('');
+
+        const html = `<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(reportTitle || 'Backtest Performance Report')}</title>
+    <style>
+        @page { size: A4; margin: 14mm; }
+        body { font-family: Arial, Helvetica, sans-serif; color: #111827; margin: 0; }
+        h1 { font-size: 20px; margin: 0 0 6px; }
+        h2 { font-size: 14px; margin: 16px 0 8px; }
+        p { margin: 0; color: #374151; }
+        .header { border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 14px; }
+        .meta { font-size: 12px; color: #4b5563; }
+        ul { margin: 0; padding-left: 20px; }
+        li { margin-bottom: 6px; font-size: 12px; line-height: 1.4; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; }
+        th { background: #f3f4f6; }
+        .muted { color: #6b7280; font-size: 11px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>${escapeHtml(reportTitle || 'Backtest Performance Report')}</h1>
+        <p>${escapeHtml(selectedMarketLabel)}</p>
+        <p class="meta">Generated from Analytics module</p>
+    </div>
+
+    <h2>Executive Summary</h2>
+    <ul>${notesRows}</ul>
+
+    <h2>Latest Execution Log (20 rows)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Time (UTC)</th>
+                <th>Action</th>
+                <th>Price</th>
+                <th>Qty</th>
+                <th>Cash After</th>
+                <th>Position After</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${tradeRows || '<tr><td colspan="7">No trades executed.</td></tr>'}
+        </tbody>
+    </table>
+
+    <p class="muted" style="margin-top:12px;">This report is generated automatically for strategy review and communication purposes.</p>
+</body>
+</html>`;
+
+        popup.document.open();
+        popup.document.write(html);
+        popup.document.close();
+        popup.focus();
+        window.setTimeout(() => {
+            popup.print();
+        }, 300);
+    }
+
+    async function shareBacktestReport() {
+        if (!backtestResult) return;
+        if (shareChannels.length === 0) {
+            setShareStatusMessage('Please choose at least one channel.');
+            return;
+        }
+
+        setIsSharingBacktestReport(true);
+        setShareStatusMessage('');
+
+        try {
+            const tasks: Array<Promise<void>> = [];
+
+            if (shareChannels.includes('WHATSAPP')) {
+                const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(reportShareMessage)}`;
+                window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+            }
+
+            if (shareChannels.includes('DISCORD')) {
+                tasks.push((async () => {
+                    const response = await fetch('/api/polymarket/backtest-report/share', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            title: reportTitle,
+                            lines: reportLines,
+                        }),
+                    });
+
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        throw new Error(data?.error || 'Failed to share report to Discord');
+                    }
+                })());
+            }
+
+            await Promise.all(tasks);
+            setShareStatusMessage(`Report shared via ${shareChannels.join(' + ')}.`);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to share report';
+            setShareStatusMessage(message);
+        } finally {
+            setIsSharingBacktestReport(false);
+        }
+    }
+
     const backtestPanel = (
-        <div className="bg-linear-to-b from-white to-gray-50 rounded-2xl border border-gray-200 shadow-sm p-6 space-y-5">
+        <div className="rounded-2xl border border-slate-300 bg-white shadow-sm p-6 space-y-5">
             <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
-                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Auto Buy/Sell Backtest</h3>
-                    <p className="text-xs text-gray-500 mt-1">Historical simulation for Polymarket market rules</p>
+                    <h3 className="text-lg font-bold text-slate-900 tracking-wide">Auto Buy/Sell Backtest</h3>
+                    <p className="text-sm text-slate-600 mt-1">Configure strategy parameters and run a historical simulation.</p>
                 </div>
                 <button
                     onClick={runBacktest}
                     disabled={isRunningBacktest}
-                    className="px-4 py-2 text-sm font-semibold text-white bg-gray-900 hover:bg-black disabled:bg-gray-400 rounded-xl transition-colors"
+                    className="px-5 py-2.5 text-base font-semibold text-white bg-slate-900 hover:bg-black disabled:bg-slate-400 rounded-lg transition-colors"
                 >
                     {isRunningBacktest ? 'Running...' : 'Run Backtest'}
                 </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">Strategy Parameters</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 [&>div]:rounded-lg [&>div]:border [&>div]:border-slate-200 [&>div]:bg-slate-50 [&>div]:p-3 [&_label]:mb-2 [&_label]:block [&_label]:text-sm [&_label]:font-semibold [&_label]:text-slate-700 [&_input]:h-11 [&_input]:rounded-lg [&_input]:border-slate-300 [&_input]:bg-white [&_input]:px-3 [&_input]:text-base [&_input]:font-medium [&_input]:text-slate-900 [&_select]:h-11 [&_select]:rounded-lg [&_select]:border-slate-300 [&_select]:bg-white [&_select]:px-3 [&_select]:text-base [&_select]:font-medium [&_select]:text-slate-900">
                 <div>
                     <label className="block text-xs font-semibold text-gray-500 mb-1">Market</label>
                     <div ref={marketPickerRef} className="relative">
@@ -631,7 +787,7 @@ export default function PolymarketAnalyticsUI({
                                     setMarketQuery(selectedMarket?.question || fallbackMarketQuestion || '');
                                 }
                             }}
-                            className="w-full px-3 py-2 rounded-xl border border-gray-300 bg-white text-left text-sm text-gray-800 hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                            className="w-full h-11 px-3 rounded-lg border border-slate-300 bg-white text-left text-base font-medium text-slate-900 hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300"
                         >
                             <span className="flex items-center justify-between gap-2">
                                 <span className="truncate">{selectedMarket?.question || fallbackMarketQuestion || 'Select a market'}</span>
@@ -701,7 +857,7 @@ export default function PolymarketAnalyticsUI({
                             </div>
                         )}
                     </div>
-                    <p className="mt-1 truncate text-[11px] text-gray-500">Selected event: {selectedMarketLabel}</p>
+                    <p className="mt-2 truncate text-sm text-slate-600">Selected market is ready.</p>
                 </div>
                 <div>
                     <label className="block text-xs font-semibold text-gray-500 mb-1">Action</label>
@@ -756,39 +912,18 @@ export default function PolymarketAnalyticsUI({
                     <input type="number" min="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200" />
                 </div>
                 <div>
-                    <label className="block text-xs font-semibold text-gray-500 mb-1">Start</label>
-                    <input
-                        type="date"
-                        max={today}
-                        value={startDate}
-                        onChange={(event) => {
-                            const rawStart = event.target.value;
-                            const nextStart = rawStart > today ? today : rawStart;
-                            setStartDate(nextStart);
-                            if (endDate < nextStart) {
-                                setEndDate(nextStart);
-                            }
-                        }}
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Backtest Window</label>
+                    <select
+                        value={windowPreset}
+                        onChange={(event) => setWindowPreset(event.target.value as BacktestWindowPreset)}
                         className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200"
-                    />
-                </div>
-                <div>
-                    <label className="block text-xs font-semibold text-gray-500 mb-1">End</label>
-                    <input
-                        type="date"
-                        min={startDate || today}
-                        max={today}
-                        value={endDate}
-                        onChange={(event) => {
-                            const rawEnd = event.target.value;
-                            let nextEnd = rawEnd > today ? today : rawEnd;
-                            if (nextEnd < startDate) {
-                                nextEnd = startDate;
-                            }
-                            setEndDate(nextEnd);
-                        }}
-                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-200"
-                    />
+                    >
+                        <option value="1W">Last 1 week</option>
+                        <option value="1M">Last 1 month</option>
+                        <option value="3M">Last 3 months</option>
+                    </select>
+                    <p className="mt-1 text-[11px] text-gray-500">Range: {startDate} to {endDate}</p>
+                    <p className="mt-1 text-xs font-medium text-red-600">Reminder: prioritize short-term markets (1 week to 1 month).</p>
                 </div>
 
                 <div>
@@ -809,20 +944,20 @@ export default function PolymarketAnalyticsUI({
             </div>
 
             {backtestError && (
-                <div className="px-4 py-3 rounded-xl border border-red-200 bg-red-50 text-sm text-red-700">
+                <div className="px-4 py-3 rounded-lg border border-red-300 bg-red-50 text-sm text-red-800 font-medium">
                     {backtestError}
                 </div>
             )}
 
             {backtestResult && (
-                <div className="rounded-xl border border-gray-200 bg-white/90 p-4">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
                             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Backtest ready</p>
                             <p className="text-sm text-gray-700 mt-1">Report generated for <span className="font-semibold text-gray-900">{selectedMarketLabel}</span></p>
                         </div>
                         <div className="flex items-center gap-2">
-                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${backtestResult.result.netPnL >= 0 ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-rose-50 text-rose-600 border border-rose-100'}`}>
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border ${backtestResult.result.netPnL >= 0 ? 'text-emerald-700 border-emerald-200 bg-emerald-50/50' : 'text-red-700 border-red-200 bg-red-50/50'}`}>
                                 PnL {backtestResult.result.netPnL >= 0 ? '+' : ''}{formatFixed(backtestResult.result.netPnL, 2)}
                             </span>
                             <button
@@ -845,7 +980,7 @@ export default function PolymarketAnalyticsUI({
                 onClick={() => setIsReportModalOpen(false)}
             />
 
-            <div className="relative w-full max-w-6xl rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden">
+            <div className="relative w-full max-w-7xl rounded-2xl border border-gray-200 bg-white shadow-2xl overflow-hidden">
                 <div className="flex items-start justify-between gap-4 border-b border-gray-200 bg-linear-to-r from-white to-gray-50 px-5 py-4">
                     <div>
                         <h3 className="text-base font-bold text-gray-900">Backtest Report</h3>
@@ -861,167 +996,218 @@ export default function PolymarketAnalyticsUI({
                 </div>
 
                 <div className="max-h-[80vh] overflow-auto p-5 space-y-5">
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                        <div className="rounded-xl border border-rose-100 bg-rose-50 p-4">
-                            <p className="text-[11px] uppercase tracking-wide font-semibold text-rose-500">Net PnL</p>
-                            <p className={`text-xl font-bold mt-1 ${backtestResult.result.netPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                {backtestResult.result.netPnL >= 0 ? '+' : ''}{formatFixed(backtestResult.result.netPnL, 2)}
-                            </p>
-                            <p className="text-xs text-gray-500 mt-1">Return {formatFixed(backtestResult.result.returnPct, 2)}%</p>
+                    <div className="rounded-xl border border-gray-200 bg-white p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Share Report</p>
+                        <div className="flex flex-wrap items-center gap-4">
+                            <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                                <input
+                                    type="checkbox"
+                                    checked={shareChannels.includes('WHATSAPP')}
+                                    onChange={() => {
+                                        setShareChannels((prev) => prev.includes('WHATSAPP')
+                                            ? prev.filter((item) => item !== 'WHATSAPP')
+                                            : [...prev, 'WHATSAPP']);
+                                    }}
+                                    className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-400"
+                                />
+                                WhatsApp
+                            </label>
+                            <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                                <input
+                                    type="checkbox"
+                                    checked={shareChannels.includes('DISCORD')}
+                                    onChange={() => {
+                                        setShareChannels((prev) => prev.includes('DISCORD')
+                                            ? prev.filter((item) => item !== 'DISCORD')
+                                            : [...prev, 'DISCORD']);
+                                    }}
+                                    className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-400"
+                                />
+                                Discord
+                            </label>
+
+                            <button
+                                onClick={shareBacktestReport}
+                                disabled={isSharingBacktestReport}
+                                className="px-3.5 py-2 rounded-lg bg-gray-900 text-white text-sm font-semibold hover:bg-black disabled:bg-gray-400 transition-colors"
+                            >
+                                {isSharingBacktestReport ? 'Sharing...' : 'Share Report'}
+                            </button>
+                            <button
+                                onClick={downloadBacktestPdf}
+                                className="px-3.5 py-2 rounded-lg border border-gray-300 bg-white text-gray-800 text-sm font-semibold hover:bg-gray-100 transition-colors"
+                            >
+                                Download PDF
+                            </button>
                         </div>
-                        <div className="rounded-xl border border-sky-100 bg-sky-50 p-4">
-                            <p className="text-[11px] uppercase tracking-wide font-semibold text-sky-600">Capital</p>
-                            <p className="text-lg font-bold text-gray-900 mt-1">{formatFixed(backtestResult.config.initialCash, 2)} start</p>
-                            <p className="text-xs text-gray-600 mt-1">Cash {formatFixed(backtestResult.result.endingCash, 2)} / Position {formatFixed(backtestResult.result.endingPositionValue, 2)}</p>
-                        </div>
-                        <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
-                            <p className="text-[11px] uppercase tracking-wide font-semibold text-amber-600">Trades</p>
-                            <p className="text-lg font-bold text-gray-900 mt-1">{backtestResult.result.tradesExecuted} executed</p>
-                            <p className="text-xs text-gray-600 mt-1">BUY {backtestResult.result.buyTrades} / SELL {backtestResult.result.sellTrades}</p>
-                        </div>
-                        <div className="rounded-xl border border-violet-100 bg-violet-50 p-4">
-                            <p className="text-[11px] uppercase tracking-wide font-semibold text-violet-600">Risk</p>
-                            <p className="text-lg font-bold text-gray-900 mt-1">MDD {formatFixed(backtestResult.result.maxDrawdownPct, 2)}%</p>
-                            <p className="text-xs text-gray-600 mt-1">Vs B&H {formatFixed(backtestResult.result.vsBuyAndHoldPct, 2)} pp</p>
+                        {shareStatusMessage ? (
+                            <p className="mt-2 text-xs text-gray-600">{shareStatusMessage}</p>
+                        ) : null}
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 bg-white p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Executive Summary</p>
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm text-left border-collapse">
+                                <thead>
+                                    <tr className="border-b border-gray-200 text-gray-500">
+                                        <th className="py-2 pr-4 font-semibold">Metric</th>
+                                        <th className="py-2 pr-4 font-semibold">Value</th>
+                                        <th className="py-2 pr-4 font-semibold">Benchmark / Notes</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="text-gray-700">
+                                    <tr className="border-b border-gray-100">
+                                        <td className="py-2 pr-4 font-medium">Net PnL</td>
+                                        <td className={`py-2 pr-4 font-semibold ${backtestResult.result.netPnL >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                                            {backtestResult.result.netPnL >= 0 ? '+' : ''}{formatFixed(backtestResult.result.netPnL, 2)}
+                                        </td>
+                                        <td className="py-2 pr-4">Return {formatFixed(backtestResult.result.returnPct, 2)}%</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-100">
+                                        <td className="py-2 pr-4 font-medium">Final Equity</td>
+                                        <td className="py-2 pr-4 font-semibold">{formatFixed(backtestResult.result.finalEquity, 2)}</td>
+                                        <td className="py-2 pr-4">Initial {formatFixed(backtestResult.result.initialEquity, 2)}</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-100">
+                                        <td className="py-2 pr-4 font-medium">Max Drawdown</td>
+                                        <td className="py-2 pr-4 font-semibold">{formatFixed(backtestResult.result.maxDrawdownPct, 2)}%</td>
+                                        <td className="py-2 pr-4">Risk profile</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-100">
+                                        <td className="py-2 pr-4 font-medium">Trade Count</td>
+                                        <td className="py-2 pr-4 font-semibold">{backtestResult.result.tradesExecuted}</td>
+                                        <td className="py-2 pr-4">BUY {backtestResult.result.buyTrades} / SELL {backtestResult.result.sellTrades}</td>
+                                    </tr>
+                                    <tr>
+                                        <td className="py-2 pr-4 font-medium">Vs Buy & Hold</td>
+                                        <td className="py-2 pr-4 font-semibold">{formatFixed(backtestResult.result.vsBuyAndHoldPct, 2)} pp</td>
+                                        <td className="py-2 pr-4">Positive means strategy outperformed</td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <div className="rounded-xl border border-slate-200 bg-linear-to-br from-slate-50 to-white p-4">
-                            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Core Snapshot</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                                    <p className="text-[10px] uppercase tracking-wide text-slate-400">Selected</p>
-                                    <p className="text-xs font-semibold text-slate-700 mt-1">{backtestResult.config.start} → {backtestResult.config.end}</p>
-                                </div>
-                                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                                    <p className="text-[10px] uppercase tracking-wide text-slate-400">Covered</p>
-                                    <p className="text-xs font-semibold text-slate-700 mt-1">{backtestResult.market.startDate} → {backtestResult.market.endDate}</p>
-                                </div>
-                                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                                    <p className="text-[10px] uppercase tracking-wide text-slate-400">Price Band</p>
-                                    <p className="text-xs font-semibold text-slate-700 mt-1">{formatFixed(backtestResult.market.lowPrice, 4)} ↔ {formatFixed(backtestResult.market.highPrice, 4)}</p>
-                                </div>
-                                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                                    <p className="text-[10px] uppercase tracking-wide text-slate-400">PnL Split</p>
-                                    <p className="text-xs font-semibold text-slate-700 mt-1">R {formatFixed(backtestResult.result.realizedPnL, 2)} / U {formatFixed(backtestResult.result.unrealizedPnL, 2)}</p>
-                                </div>
-                                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 sm:col-span-2">
-                                    <p className="text-[10px] uppercase tracking-wide text-slate-400">Flow</p>
-                                    <p className="text-xs font-semibold text-slate-700 mt-1">Buy {formatFixed(backtestResult.result.totalBoughtCost, 2)} • Sell {formatFixed(backtestResult.result.totalSoldProceeds, 2)}</p>
-                                </div>
-                                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 sm:col-span-2">
-                                    <p className="text-[10px] uppercase tracking-wide text-slate-400">Resolved Market ID</p>
-                                    <p className="text-xs font-semibold text-slate-700 mt-1 break-all">{backtestResult.market.resolvedMarketId || backtestResult.config.marketId}</p>
-                                </div>
-                                {backtestResult.config.triggerType === 'PRICE_TARGET' && backtestResult.config.action === 'BOTH' ? (
-                                    <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 sm:col-span-2">
-                                        <p className="text-[10px] uppercase tracking-wide text-violet-500">Trigger Lines</p>
-                                        <p className="text-xs font-semibold text-violet-700 mt-1">BUY ≤ {formatFixed(backtestResult.config.buyTargetPrice, 4)} • SELL ≥ {formatFixed(backtestResult.config.sellTargetPrice, 4)}</p>
-                                    </div>
-                                ) : null}
-                            </div>
-                        </div>
-                        <div className="rounded-xl border border-indigo-100 bg-linear-to-br from-indigo-50 to-white p-4">
-                            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Trade Mix</p>
-                            <ResponsiveContainer width="100%" height={180}>
-                                <PieChart>
-                                    <Pie
-                                        data={backtestTradeActionData}
-                                        dataKey="count"
-                                        nameKey="action"
-                                        cx="50%"
-                                        cy="50%"
-                                        innerRadius={48}
-                                        outerRadius={76}
-                                        paddingAngle={4}
-                                        strokeWidth={0}
-                                    >
-                                        <Cell fill="#93C5FD" />
-                                        <Cell fill="#FDBA74" />
-                                    </Pie>
-                                    <Tooltip
-                                        contentStyle={{
-                                            backgroundColor: 'white',
-                                            border: '1px solid #e5e7eb',
-                                            borderRadius: '10px',
-                                        }}
-                                        formatter={(value: number | undefined, name: string) => [value || 0, `${name} trades`]}
-                                    />
-                                    <Legend wrapperStyle={{ fontSize: '12px' }} />
-                                </PieChart>
-                            </ResponsiveContainer>
+                    <div className="rounded-xl border border-gray-200 bg-white p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Configuration & Market Coverage</p>
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm text-left border-collapse">
+                                <thead>
+                                    <tr className="border-b border-gray-200 text-gray-500">
+                                        <th className="py-2 pr-4 font-semibold">Section</th>
+                                        <th className="py-2 pr-4 font-semibold">Field</th>
+                                        <th className="py-2 pr-4 font-semibold">Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="text-gray-700">
+                                    <tr className="border-b border-gray-100">
+                                        <td className="py-2 pr-4 font-medium">Window</td>
+                                        <td className="py-2 pr-4">Date Range</td>
+                                        <td className="py-2 pr-4">{backtestResult.config.start} to {backtestResult.config.end} (Preset {windowPreset})</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-100">
+                                        <td className="py-2 pr-4 font-medium">Strategy</td>
+                                        <td className="py-2 pr-4">Action / Trigger / Mode</td>
+                                        <td className="py-2 pr-4">{backtestResult.config.action} / {backtestResult.config.triggerType} / {backtestResult.config.mode}</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-100">
+                                        <td className="py-2 pr-4 font-medium">Execution</td>
+                                        <td className="py-2 pr-4">Quantity / Initial Cash / Initial Position</td>
+                                        <td className="py-2 pr-4">{formatFixed(backtestResult.config.quantity, 2)} / {formatFixed(backtestResult.config.initialCash, 2)} / {formatFixed(backtestResult.config.initialPosition, 2)}</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-100">
+                                        <td className="py-2 pr-4 font-medium">Market</td>
+                                        <td className="py-2 pr-4">Resolved Market ID</td>
+                                        <td className="py-2 pr-4 break-all">{backtestResult.market.resolvedMarketId || backtestResult.config.marketId}</td>
+                                    </tr>
+                                    <tr className="border-b border-gray-100">
+                                        <td className="py-2 pr-4 font-medium">Market</td>
+                                        <td className="py-2 pr-4">History Coverage</td>
+                                        <td className="py-2 pr-4">{backtestResult.market.startDate} to {backtestResult.market.endDate} ({backtestResult.market.points} points)</td>
+                                    </tr>
+                                    <tr>
+                                        <td className="py-2 pr-4 font-medium">Market</td>
+                                        <td className="py-2 pr-4">Price Band</td>
+                                        <td className="py-2 pr-4">{formatFixed(backtestResult.market.lowPrice, 4)} to {formatFixed(backtestResult.market.highPrice, 4)}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
 
-                    {(backtestResult.insights?.length || backtestResult.skipReasonSummary?.length) ? (
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                            <div className="rounded-xl border border-emerald-100 bg-linear-to-br from-emerald-50 to-white p-4">
-                                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Why Profit / Loss</p>
-                                <div className="flex flex-wrap gap-2">
-                                    {conciseBacktestInsights.length === 0 ? (
-                                        <p className="text-sm text-gray-500">No insights generated.</p>
-                                    ) : conciseBacktestInsights.map((insight, index) => (
-                                        <span key={`${index}-${insight.slice(0, 14)}`} className="inline-flex rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700">
-                                            {insight}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                            <div className="rounded-xl border border-amber-100 bg-linear-to-br from-amber-50 to-white p-4">
-                                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Top Skipped Reasons</p>
-                                {(backtestResult.skipReasonSummary || []).length === 0 ? (
-                                    <p className="text-sm text-gray-500">No skipped signals.</p>
-                                ) : (
-                                    <ul className="space-y-2">
-                                        {(backtestResult.skipReasonSummary || []).map((row) => (
-                                            <li key={row.reason} className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-amber-700 font-medium">{row.reason}: {row.count}</li>
-                                        ))}
-                                    </ul>
-                                )}
-                            </div>
-                        </div>
-                    ) : null}
-
-                    <div className="rounded-xl border border-cyan-100 bg-linear-to-br from-cyan-50 to-white p-4">
-                        <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Execution Price Timeline (Last 28 Buckets)</p>
-                        <p className="text-[11px] text-gray-500 mb-3">X-axis: date, Y-axis: average executed price. Tooltip shows quantity details.</p>
-                        {backtestExecutionPriceData.length === 0 ? (
-                            <p className="text-sm text-gray-500">No trades executed for selected parameters.</p>
+                    <div className="rounded-xl border border-gray-200 bg-white p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Execution Log Table (Latest 20)</p>
+                        {backtestResult.trades.length === 0 ? (
+                            <p className="text-sm text-gray-500">No trades executed in this window.</p>
                         ) : (
-                            <ResponsiveContainer width="100%" height={220}>
-                                <LineChart data={backtestExecutionPriceData}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6B7280' }} />
-                                    <YAxis tick={{ fontSize: 11, fill: '#6B7280' }} domain={[0, 1]} />
-                                    <Tooltip
-                                        contentStyle={{
-                                            backgroundColor: 'white',
-                                            border: '1px solid #e5e7eb',
-                                            borderRadius: '10px',
-                                        }}
-                                        formatter={(value: number | undefined, name: string, props: any) => {
-                                            const payload = props?.payload || {};
-                                            if (name === 'BUY Avg Price') {
-                                                return [
-                                                    value != null ? `${formatFixed(value, 4)} (qty ${formatFixed(payload.buyQty, 2)})` : 'N/A',
-                                                    name,
-                                                ];
-                                            }
-                                            if (name === 'SELL Avg Price') {
-                                                return [
-                                                    value != null ? `${formatFixed(value, 4)} (qty ${formatFixed(payload.sellQty, 2)})` : 'N/A',
-                                                    name,
-                                                ];
-                                            }
-                                            return [value ?? 'N/A', name];
-                                        }}
-                                    />
-                                    <Legend wrapperStyle={{ fontSize: '12px' }} />
-                                    <Line type="monotone" dataKey="buyAvgPrice" stroke="#3B82F6" strokeWidth={2.5} dot={{ r: 3 }} connectNulls name="BUY Avg Price" />
-                                    <Line type="monotone" dataKey="sellAvgPrice" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 3 }} connectNulls name="SELL Avg Price" />
-                                </LineChart>
-                            </ResponsiveContainer>
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full text-sm text-left border-collapse">
+                                    <thead>
+                                        <tr className="border-b border-gray-200 text-gray-500">
+                                            <th className="py-2 pr-4 font-semibold">Time (UTC)</th>
+                                            <th className="py-2 pr-4 font-semibold">Action</th>
+                                            <th className="py-2 pr-4 font-semibold">Price</th>
+                                            <th className="py-2 pr-4 font-semibold">Qty</th>
+                                            <th className="py-2 pr-4 font-semibold">Trigger</th>
+                                            <th className="py-2 pr-4 font-semibold">Cash After</th>
+                                            <th className="py-2 pr-4 font-semibold">Position After</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="text-gray-700">
+                                        {backtestResult.trades.slice(-20).reverse().map((trade, index) => (
+                                            <tr key={`${trade.date}-${trade.action}-${index}`} className="border-b border-gray-100 last:border-b-0">
+                                                <td className="py-2 pr-4 whitespace-nowrap">{trade.date}</td>
+                                                <td className="py-2 pr-4 font-medium">{trade.action}</td>
+                                                <td className="py-2 pr-4">{formatFixed(trade.price, 4)}</td>
+                                                <td className="py-2 pr-4">{formatFixed(trade.quantity, 2)}</td>
+                                                <td className="py-2 pr-4">{formatFixed(trade.triggerValue, 4)}</td>
+                                                <td className="py-2 pr-4">{formatFixed(trade.cashAfter, 2)}</td>
+                                                <td className="py-2 pr-4">{formatFixed(trade.positionAfter, 2)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 bg-white p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Skipped Signals</p>
+                        {(backtestResult.skipReasonSummary || []).length === 0 ? (
+                            <p className="text-sm text-gray-500">No skipped signals.</p>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="min-w-full text-sm text-left border-collapse">
+                                    <thead>
+                                        <tr className="border-b border-gray-200 text-gray-500">
+                                            <th className="py-2 pr-4 font-semibold">Reason</th>
+                                            <th className="py-2 pr-4 font-semibold">Count</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="text-gray-700">
+                                        {(backtestResult.skipReasonSummary || []).map((row) => (
+                                            <tr key={row.reason} className="border-b border-gray-100 last:border-b-0">
+                                                <td className="py-2 pr-4">{row.reason}</td>
+                                                <td className="py-2 pr-4 font-medium">{row.count}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 bg-white p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Analyst Notes</p>
+                        {conciseBacktestInsights.length === 0 ? (
+                            <p className="text-sm text-gray-500">No insights generated.</p>
+                        ) : (
+                            <ol className="space-y-2 text-sm text-gray-700 list-decimal pl-5">
+                                {conciseBacktestInsights.map((insight, index) => (
+                                    <li key={`${index}-${insight.slice(0, 14)}`}>{insight}</li>
+                                ))}
+                            </ol>
                         )}
                     </div>
                 </div>
@@ -1037,11 +1223,18 @@ export default function PolymarketAnalyticsUI({
                         <h1 className="text-2xl font-bold text-gray-900">Market Analytics</h1>
                         <p className="text-sm text-gray-400 mt-1">Insights and trends from your predictions</p>
                     </div>
-                    <Link href="/polymarket/overview">
-                        <button className="px-4 py-2 text-sm font-semibold text-gray-600 bg-white hover:bg-gray-50 rounded-xl transition-all border border-gray-100">
-                            ← Back to Overview
-                        </button>
-                    </Link>
+                    <div className="flex items-center gap-2">
+                        <Link href="/polymarket/analytics/research">
+                            <button className="px-4 py-2 text-sm font-semibold text-white bg-gray-900 hover:bg-black rounded-xl transition-all border border-gray-900">
+                                Research Markets
+                            </button>
+                        </Link>
+                        <Link href="/polymarket/overview">
+                            <button className="px-4 py-2 text-sm font-semibold text-gray-600 bg-white hover:bg-gray-50 rounded-xl transition-all border border-gray-100">
+                                ← Back to Overview
+                            </button>
+                        </Link>
+                    </div>
                 </div>
 
                 <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center shadow-sm">
@@ -1070,18 +1263,25 @@ export default function PolymarketAnalyticsUI({
     }
 
     return (
-        <div className="max-w-340 mx-auto px-6 py-4 space-y-8">
+        <div className="mx-auto w-full max-w-screen-2xl px-6 py-4 space-y-8">
             {/* Header */}
             <div className="flex items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">Market Analytics</h1>
                     <p className="text-sm text-gray-500 mt-1">Comprehensive analysis of your predictions</p>
                 </div>
-                <Link href="/polymarket/overview">
-                    <button className="px-4 py-2 text-sm font-semibold text-gray-700 bg-white hover:bg-gray-100 rounded-xl transition-all border border-gray-200">
-                        ← Back to Overview
-                    </button>
-                </Link>
+                <div className="flex items-center gap-2">
+                    <Link href="/polymarket/analytics/research">
+                        <button className="px-4 py-2 text-sm font-semibold text-white bg-gray-900 hover:bg-black rounded-xl transition-all border border-gray-900">
+                            Research Markets
+                        </button>
+                    </Link>
+                    <Link href="/polymarket/overview">
+                        <button className="px-4 py-2 text-sm font-semibold text-gray-700 bg-white hover:bg-gray-100 rounded-xl transition-all border border-gray-200">
+                            ← Back to Overview
+                        </button>
+                    </Link>
+                </div>
             </div>
 
             {backtestPanel}

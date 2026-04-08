@@ -8,23 +8,29 @@ export async function GET(request: NextRequest) {
         const searchParams = request.nextUrl.searchParams;
         const limit = searchParams.get("limit") || "100";
         const offset = searchParams.get("offset") || "0";
+        const includeClosed = searchParams.get("includeClosed") === "1";
 
-        // Fetch markets from Polymarket API
-        const response = await fetch(
-            `${POLYMARKET_API}/events?limit=${limit}&offset=${offset}&active=true`,
-            {
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                cache: "no-store",
+        const fetchEvents = async (closed: "true" | "false") => {
+            const response = await fetch(
+                `${POLYMARKET_API}/events?limit=${limit}&offset=${offset}&closed=${closed}`,
+                {
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    cache: "no-store",
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error(`Polymarket API error: ${response.status}`);
             }
-        );
 
-        if (!response.ok) {
-            throw new Error(`Polymarket API error: ${response.status}`);
-        }
-
-        const data = await response.json();
+            const data = await response.json();
+            return Array.isArray(data) ? data : [];
+        };
+        const openEvents = await fetchEvents("false");
+        const closedEvents = includeClosed ? await fetchEvents("true") : [];
+        const data = includeClosed ? [...openEvents, ...closedEvents] : openEvents;
 
         return NextResponse.json({
             success: true,

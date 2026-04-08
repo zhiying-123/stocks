@@ -48,7 +48,7 @@ async function fetchMarketOptions(preferredIds: string[]): Promise<MarketOption[
                         if (typeof market !== "object" || market === null) continue;
                         const marketRecord = market as Record<string, unknown>;
                         const clobIds = parseStringArray(marketRecord.clobTokenIds);
-                        const tokenId = String(marketRecord.conditionId || "").trim() || clobIds[0]?.trim();
+                        const tokenId = clobIds[0]?.trim() || String(marketRecord.conditionId || "").trim() || String(marketRecord.id || "").trim();
                         if (!tokenId || optionMap.has(tokenId)) continue;
 
                         const question = String(
