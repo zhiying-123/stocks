@@ -58,7 +58,7 @@ export default async function ProfilePage() {
 
                             <div className="mt-4 flex flex-wrap gap-2">
                                 <span className="px-3 py-1 rounded-full bg-gray-900 text-white text-xs font-semibold">
-                                    {user?.role || "STUDENT"}
+                                    {user?.role || "member"}
                                 </span>
                                 <span className="px-3 py-1 rounded-full bg-white border border-gray-300 text-xs font-semibold text-gray-700">
                                     Verified Account

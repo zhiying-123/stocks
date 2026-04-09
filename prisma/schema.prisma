@@ -18,7 +18,7 @@ model User {
   email       String @unique
   name        String
   password    String
-  role        String @default("STUDENT")
+  role        String @default("member")
   status      String @default("ACTIVE")
   access_time Int    @default(0)
 }
