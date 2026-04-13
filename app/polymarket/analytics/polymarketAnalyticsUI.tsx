@@ -587,7 +587,7 @@ export default function PolymarketAnalyticsUI({
     }, [backtestResult, selectedMarketLabel]);
 
     const reportLines = useMemo(() => {
-        if (!backtestResult) return '';
+        if (!backtestResult) return [] as string[];
 
         const insights = conciseBacktestInsights.length > 0
             ? conciseBacktestInsights.slice(0, 3).join(' | ')
