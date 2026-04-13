@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "backtest:auto-buy-sell": "tsx scripts/backtest-auto-buy-sell.ts"
+    "backtest:auto-buy-sell": "tsx scripts/backtest-auto-buy-sell.ts",
+    "quick:setup-users": "tsx scripts/setup-quick-login-users.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.3.0",

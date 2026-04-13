@@ -171,6 +171,13 @@ export default function LoginUI() {
               </a>
               <div className="w-px h-4 bg-gray-300" />
               <a
+                href="/login/quick"
+                className="text-gray-600 hover:text-gray-900 transition-colors"
+              >
+                Quick Login
+              </a>
+              <div className="w-px h-4 bg-gray-300" />
+              <a
                 href="/forgot-password"
                 className="text-gray-600 hover:text-gray-900 transition-colors"
               >

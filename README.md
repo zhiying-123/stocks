@@ -16,6 +16,36 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Quick Login
+
+Use the multi-account quick login page:
+
+- `/login/quick`
+
+Before using it, prepare quick login users:
+
+```bash
+npm run quick:setup-users
+```
+
+This command creates:
+
+- a pooled `New User` template set (`quick.new.1` to `quick.new.20` by default)
+- a pooled `Intermediate User` template set (`quick.intermediate.1` to `quick.intermediate.20` by default)
+
+Quick login behavior:
+
+- one-click login rotates through the pool templates (round-robin style)
+- each click creates a separate temporary account and signs in with that account
+- users do not share watchlist/portfolio state with each other
+
+Optional environment variables:
+
+- `QUICK_LOGIN_USER_PASSWORD`
+- `QUICK_LOGIN_POLYMARKET_IDS` (comma-separated market condition IDs fallback)
+- `QUICK_LOGIN_POOL_SIZE` (default: 20)
+- `QUICK_LOGIN_EMAIL_DOMAIN` (default: `hstocks.local`)
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

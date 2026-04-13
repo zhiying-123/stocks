@@ -5,6 +5,40 @@
 import prisma from "@/lib/prisma";
 import { cookies } from "next/headers";
 
+type AuthUser = {
+  u_id: number;
+  email: string;
+  name: string;
+  role: string;
+};
+
+export async function createAuthSession(user: AuthUser) {
+  const cookieStore = await cookies();
+
+  cookieStore.set("auth", "true", {
+    httpOnly: true,
+    path: "/",
+    maxAge: 3600,
+    sameSite: "lax",
+  });
+
+  cookieStore.set(
+    "user",
+    JSON.stringify({
+      id: user.u_id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+    }),
+    {
+      httpOnly: true,
+      path: "/",
+      maxAge: 3600,
+      sameSite: "lax",
+    }
+  );
+}
+
 export async function loginRequest(email: string, password: string) {
   const user = await prisma.user.findUnique({
     where: { email },
@@ -22,7 +56,7 @@ export async function loginRequest(email: string, password: string) {
     // increment access_time
     const current = user.access_time ?? 0;
     const next = current + 1;
-    const updates: any = { access_time: next };
+    const updates: { access_time: number; status?: string } = { access_time: next };
     if (next >= 3) {
       updates.status = "INACTIVE";
     }
@@ -42,31 +76,7 @@ export async function loginRequest(email: string, password: string) {
     data: { access_time: 0, status: "ACTIVE" },
   });
 
-  const cookieStore = await cookies();
-
-  // Set cookies with maxAge for better control (1 hour = 3600 seconds)
-  cookieStore.set("auth", "true", {
-    httpOnly: true,
-    path: "/",
-    maxAge: 3600, // 1 hour
-    sameSite: "lax",
-  });
-
-  cookieStore.set(
-    "user",
-    JSON.stringify({
-      id: user.u_id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-    }),
-    {
-      httpOnly: true,
-      path: "/",
-      maxAge: 3600, // 1 hour
-      sameSite: "lax",
-    }
-  );
+  await createAuthSession(user);
 
   return {
     success: true,

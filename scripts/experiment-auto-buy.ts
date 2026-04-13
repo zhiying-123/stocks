@@ -74,16 +74,16 @@ async function getOneOpenMarket() {
 }
 
 function getCheckUrls() {
-  const appUrlRaw = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const appUrl = appUrlRaw.replace(/\/$/, "");
+  const appUrlRaw = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || process.env.VERCEL_URL;
+  if (!appUrlRaw) {
+    throw new Error("Missing NEXT_PUBLIC_APP_URL (or APP_URL / VERCEL_URL) for online checker URL");
+  }
+  const normalizedAppUrl = appUrlRaw.startsWith("http") ? appUrlRaw : `https://${appUrlRaw}`;
+  const appUrl = normalizedAppUrl.replace(/\/$/, "");
   const secret = process.env.POLYMARKET_ALERT_CRON_SECRET || process.env.CRON_SECRET;
   const withSecret = (url: string) => (secret ? `${url}?secret=${encodeURIComponent(secret)}` : url);
 
-  return [
-    withSecret(`${appUrl}/api/polymarket/alerts/check`),
-    withSecret("http://localhost:3000/api/polymarket/alerts/check"),
-    withSecret("http://localhost:3001/api/polymarket/alerts/check"),
-  ];
+  return [withSecret(`${appUrl}/api/polymarket/alerts/check`)];
 }
 
 async function main() {
