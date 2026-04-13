@@ -1381,11 +1381,13 @@ export default function PolymarketAnalyticsUI({
                                 cx="50%"
                                 cy="50%"
                                 labelLine={false}
-                                label={(entry: { name: string; value: number }) => {
+                                label={(entry) => {
                                     const data = selectedView === 'category' ? categoryData : outcomeData;
                                     const total = data.reduce((sum, item) => sum + item.value, 0);
-                                    const percent = total > 0 ? (entry.value / total * 100).toFixed(1) : '0.0';
-                                    return `${entry.name}: ${percent}%`;
+                                    const value = Number(entry?.value ?? 0);
+                                    const name = String(entry?.name ?? 'Unknown');
+                                    const percent = total > 0 ? (value / total * 100).toFixed(1) : '0.0';
+                                    return `${name}: ${percent}%`;
                                 }}
                                 outerRadius={90}
                                 fill="#8884d8"
