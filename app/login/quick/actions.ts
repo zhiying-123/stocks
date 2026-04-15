@@ -129,26 +129,31 @@ async function createTemporaryUserFromPool(type: QuickUserType, poolUserId: numb
 }
 
 export async function loginAsQuickUser(formData: FormData) {
-  const rawType = String(formData.get("userType") || "").trim().toLowerCase();
-  const userType: QuickUserType | null = rawType === "new" || rawType === "intermediate" ? rawType : null;
+  try {
+    const rawType = String(formData.get("userType") || "").trim().toLowerCase();
+    const userType: QuickUserType | null = rawType === "new" || rawType === "intermediate" ? rawType : null;
 
-  if (!userType) {
-    redirect("/login/quick?error=invalid-user-type");
+    if (!userType) {
+      redirect("/login/quick?error=invalid-user-type");
+    }
+
+    const poolUser = await getRoundRobinPoolUser(userType);
+    if (!poolUser) {
+      redirect("/login/quick?error=missing-user");
+    }
+
+    const tempPassword = process.env.QUICK_LOGIN_USER_PASSWORD || "quick12345";
+    const temporaryUser = await createTemporaryUserFromPool(userType, poolUser.u_id, tempPassword);
+
+    await createAuthSession({
+      u_id: temporaryUser.u_id,
+      email: temporaryUser.email,
+      name: temporaryUser.name,
+      role: temporaryUser.role,
+    });
+    redirect("/h_stocks");
+  } catch (error) {
+    console.error("[quick-login] failed to sign in", error);
+    redirect("/login/quick?error=server-error");
   }
-
-  const poolUser = await getRoundRobinPoolUser(userType);
-  if (!poolUser) {
-    redirect("/login/quick?error=missing-user");
-  }
-
-  const tempPassword = process.env.QUICK_LOGIN_USER_PASSWORD || "quick12345";
-  const temporaryUser = await createTemporaryUserFromPool(userType, poolUser.u_id, tempPassword);
-
-  await createAuthSession({
-    u_id: temporaryUser.u_id,
-    email: temporaryUser.email,
-    name: temporaryUser.name,
-    role: temporaryUser.role,
-  });
-  redirect("/h_stocks");
 }

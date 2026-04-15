@@ -13,6 +13,9 @@ function errorText(error?: string) {
   if (error === "invalid-user-type") {
     return "Invalid quick login option.";
   }
+  if (error === "server-error") {
+    return "Quick login failed on server. Check Vercel logs and ensure DATABASE_URL and quick users are configured in production.";
+  }
   return "Unable to sign in with quick login.";
 }
 
