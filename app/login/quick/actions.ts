@@ -129,19 +129,26 @@ async function createTemporaryUserFromPool(type: QuickUserType, poolUserId: numb
 }
 
 export async function loginAsQuickUser(formData: FormData) {
+  const rawType = String(formData.get("userType") || "").trim().toLowerCase();
+  const userType: QuickUserType | null = rawType === "new" || rawType === "intermediate" ? rawType : null;
+
+  if (!userType) {
+    redirect("/login/quick?error=invalid-user-type");
+  }
+
+  let poolUser: Awaited<ReturnType<typeof getRoundRobinPoolUser>>;
   try {
-    const rawType = String(formData.get("userType") || "").trim().toLowerCase();
-    const userType: QuickUserType | null = rawType === "new" || rawType === "intermediate" ? rawType : null;
+    poolUser = await getRoundRobinPoolUser(userType);
+  } catch (error) {
+    console.error("[quick-login] failed to fetch pool user", error);
+    redirect("/login/quick?error=server-error");
+  }
 
-    if (!userType) {
-      redirect("/login/quick?error=invalid-user-type");
-    }
+  if (!poolUser) {
+    redirect("/login/quick?error=missing-user");
+  }
 
-    const poolUser = await getRoundRobinPoolUser(userType);
-    if (!poolUser) {
-      redirect("/login/quick?error=missing-user");
-    }
-
+  try {
     const tempPassword = process.env.QUICK_LOGIN_USER_PASSWORD || "quick12345";
     const temporaryUser = await createTemporaryUserFromPool(userType, poolUser.u_id, tempPassword);
 
@@ -151,9 +158,10 @@ export async function loginAsQuickUser(formData: FormData) {
       name: temporaryUser.name,
       role: temporaryUser.role,
     });
-    redirect("/h_stocks");
   } catch (error) {
-    console.error("[quick-login] failed to sign in", error);
+    console.error("[quick-login] failed to create temporary user session", error);
     redirect("/login/quick?error=server-error");
   }
+
+  redirect("/h_stocks");
 }
