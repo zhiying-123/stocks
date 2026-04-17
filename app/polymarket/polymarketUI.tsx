@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import CustomSelect from '@/app/components/CustomSelect';
 
@@ -472,10 +473,29 @@ export default function PolymarketUI({ markets, currency, watchlist: initialWatc
         <div className="min-h-screen bg-white">
             {/* Header */}
             <div className="max-w-340 mx-auto px-6 py-3">
-                <h1 className="text-2xl font-bold text-gray-900">Polymarket</h1>
-                <p className="text-gray-600 mt-1 text-sm">
-                    Trade on real-world events and prediction markets
-                </p>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900">Polymarket</h1>
+                        <p className="text-gray-600 mt-1 text-sm">
+                            Trade on real-world events and prediction markets
+                        </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <Link
+                            href="/polymarket/overview"
+                            className="px-3 py-2 rounded-xl border border-gray-200 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                        >
+                            Overview
+                        </Link>
+                        <Link
+                            href="/polymarket/groups"
+                            className="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-gray-700"
+                        >
+                            Groups
+                        </Link>
+                    </div>
+                </div>
             </div>
 
             <div className="max-w-340 mx-auto px-6 pb-4">

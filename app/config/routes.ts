@@ -59,6 +59,12 @@ export const polymarketRoutes: RouteConfig[] = [
         label: "Analytics",
         icon: "📊",
         description: "Market analytics"
+    },
+    {
+        path: "/polymarket/groups",
+        label: "Groups",
+        icon: "🗂️",
+        description: "Manage grouped markets"
     }
 ];
 

@@ -209,3 +209,64 @@ model PolymarketPriceAlert {
   @@index([is_active])
   @@index([created_at])
 }
+
+model PolymarketMarketGroup {
+  group_id        Int                               @id @default(autoincrement())
+  name            String
+  slug            String                            @unique
+  source_url      String?
+  source_type     String                            @default("KEYWORD") // "KEYWORD" | "MANUAL"
+  match_keywords  String // Comma-separated keywords used to match markets
+  is_system       Boolean                           @default(false)
+  created_by_u_id Int?
+  created_at      DateTime                          @default(now())
+  updated_at      DateTime                          @updatedAt
+  markets         PolymarketGroupedMarket[]
+  snapshots       PolymarketGroupedMarketSnapshot[]
+
+  @@index([is_system])
+  @@index([created_by_u_id])
+}
+
+model PolymarketGroupedMarket {
+  grouped_market_id Int                   @id @default(autoincrement())
+  group_id          Int
+  market_id         String // Polymarket condition ID used by this app
+  clob_token_id     String?
+  question          String
+  event_title       String?
+  event_slug        String?
+  category          String?
+  is_closed         Boolean               @default(false)
+  first_seen_at     DateTime              @default(now())
+  last_seen_at      DateTime              @default(now())
+  created_at        DateTime              @default(now())
+  updated_at        DateTime              @updatedAt
+  group             PolymarketMarketGroup @relation(fields: [group_id], references: [group_id], onDelete: Cascade)
+
+  @@unique([group_id, market_id])
+  @@index([group_id])
+  @@index([market_id])
+  @@index([is_closed])
+}
+
+model PolymarketGroupedMarketSnapshot {
+  snapshot_id  Int                   @id @default(autoincrement())
+  group_id     Int
+  market_id    String
+  collected_at DateTime              @default(now())
+  yes_price    Float?
+  no_price     Float?
+  volume       Float?
+  liquidity    Float?
+  end_date_iso DateTime?
+  is_closed    Boolean               @default(false)
+  question     String?
+  category     String?
+  trade_count  Int                   @default(0) // Number of trades we have stored for this market_id
+  group        PolymarketMarketGroup @relation(fields: [group_id], references: [group_id], onDelete: Cascade)
+
+  @@index([group_id])
+  @@index([market_id])
+  @@index([collected_at])
+}
