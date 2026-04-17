@@ -29,6 +29,30 @@ type GroupRow = {
     markets: GroupedMarket[];
 };
 
+type CalendarDayCount = {
+    date: string;
+    count: number;
+};
+
+type CalendarDayMarket = {
+    market_id: string;
+    question: string | null;
+    category: string | null;
+    end_date_iso: string;
+};
+
+type GroupCalendar = {
+    group_id: number;
+    selected_month: string;
+    month_label: string;
+    calendar_start_weekday: number;
+    days_in_month: number;
+    total_closed_markets: number;
+    available_months: string[];
+    day_counts: CalendarDayCount[];
+    markets_by_day: Record<string, CalendarDayMarket[]>;
+};
+
 type NoticeType = 'success' | 'error';
 
 function formatDateTime(value: string | null) {
@@ -38,12 +62,35 @@ function formatDateTime(value: string | null) {
     return date.toLocaleString();
 }
 
+function formatDayLabel(dayKey: string | null): string {
+    if (!dayKey) return 'No day selected';
+
+    const date = new Date(`${dayKey}T00:00:00.000Z`);
+    if (!Number.isFinite(date.getTime())) return dayKey;
+
+    return date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        timeZone: 'UTC',
+    });
+}
+
+function buildMonthDayKey(month: string, day: number): string {
+    return `${month}-${String(day).padStart(2, '0')}`;
+}
+
 export default function PolymarketGroupsUI() {
     const [groups, setGroups] = useState<GroupRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [notice, setNotice] = useState<{ type: NoticeType; text: string } | null>(null);
     const [syncingAll, setSyncingAll] = useState(false);
     const [syncingGroupIds, setSyncingGroupIds] = useState<Set<number>>(new Set());
+    const [calendarOpenGroupIds, setCalendarOpenGroupIds] = useState<Set<number>>(new Set());
+    const [calendarLoadingGroupIds, setCalendarLoadingGroupIds] = useState<Set<number>>(new Set());
+    const [calendarByGroupId, setCalendarByGroupId] = useState<Record<number, GroupCalendar>>({});
+    const [selectedDayByGroupId, setSelectedDayByGroupId] = useState<Record<number, string | null>>({});
 
     const [name, setName] = useState('');
     const [sourceUrl, setSourceUrl] = useState('');
@@ -198,6 +245,82 @@ export default function PolymarketGroupsUI() {
         }
     }
 
+    function firstCalendarDayWithMarkets(calendar: GroupCalendar): string | null {
+        const first = calendar.day_counts.find((entry) => entry.count > 0);
+        return first?.date || null;
+    }
+
+    async function loadConcludedCalendar(groupId: number, month?: string) {
+        setCalendarLoadingGroupIds((prev) => new Set(prev).add(groupId));
+
+        try {
+            const monthQuery = month ? `&month=${encodeURIComponent(month)}` : '';
+            const res = await fetch(`/api/polymarket/groups/concluded-calendar?groupId=${groupId}${monthQuery}`, {
+                cache: 'no-store',
+            });
+
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showNotice('error', data?.error || 'Failed to load concluded calendar');
+                return;
+            }
+
+            const calendar = data as GroupCalendar;
+            setCalendarByGroupId((prev) => ({ ...prev, [groupId]: calendar }));
+
+            setSelectedDayByGroupId((prev) => {
+                const currentSelected = prev[groupId];
+                if (currentSelected && calendar.markets_by_day[currentSelected]?.length) {
+                    return prev;
+                }
+
+                return {
+                    ...prev,
+                    [groupId]: firstCalendarDayWithMarkets(calendar),
+                };
+            });
+        } catch {
+            showNotice('error', 'Failed to load concluded calendar');
+        } finally {
+            setCalendarLoadingGroupIds((prev) => {
+                const next = new Set(prev);
+                next.delete(groupId);
+                return next;
+            });
+        }
+    }
+
+    async function toggleCalendar(groupId: number) {
+        const isOpen = calendarOpenGroupIds.has(groupId);
+
+        if (isOpen) {
+            setCalendarOpenGroupIds((prev) => {
+                const next = new Set(prev);
+                next.delete(groupId);
+                return next;
+            });
+            return;
+        }
+
+        setCalendarOpenGroupIds((prev) => new Set(prev).add(groupId));
+        if (!calendarByGroupId[groupId]) {
+            await loadConcludedCalendar(groupId);
+        }
+    }
+
+    async function moveCalendarMonth(groupId: number, direction: -1 | 1) {
+        const calendar = calendarByGroupId[groupId];
+        if (!calendar) return;
+
+        const currentIndex = calendar.available_months.indexOf(calendar.selected_month);
+        if (currentIndex < 0) return;
+
+        const targetMonth = calendar.available_months[currentIndex + direction];
+        if (!targetMonth) return;
+
+        await loadConcludedCalendar(groupId, targetMonth);
+    }
+
     const systemCount = useMemo(() => groups.filter((group) => group.is_system).length, [groups]);
 
     return (
@@ -295,6 +418,22 @@ export default function PolymarketGroupsUI() {
                     <div className="space-y-4">
                         {groups.map((group) => {
                             const isSyncing = syncingGroupIds.has(group.group_id);
+                            const isCalendarOpen = calendarOpenGroupIds.has(group.group_id);
+                            const isCalendarLoading = calendarLoadingGroupIds.has(group.group_id);
+                            const calendar = calendarByGroupId[group.group_id];
+                            const selectedDay = selectedDayByGroupId[group.group_id] || null;
+                            const selectedDayMarkets = selectedDay && calendar
+                                ? calendar.markets_by_day[selectedDay] || []
+                                : [];
+
+                            const dayCountMap = calendar
+                                ? new Map(calendar.day_counts.map((entry) => [entry.date, entry.count]))
+                                : new Map<string, number>();
+
+                            const currentMonthIndex = calendar
+                                ? calendar.available_months.indexOf(calendar.selected_month)
+                                : -1;
+
                             return (
                                 <div key={group.group_id} className="rounded-2xl border border-gray-200 p-4">
                                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -349,6 +488,126 @@ export default function PolymarketGroupsUI() {
                                             <p className="text-xs text-gray-500">Latest Sync</p>
                                             <p className="text-sm font-semibold text-gray-900 mt-1">{formatDateTime(group.latest_sync_at)}</p>
                                         </div>
+                                    </div>
+
+                                    <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div>
+                                                <p className="text-sm font-semibold text-gray-900">Concluded Markets Calendar</p>
+                                                <p className="text-xs text-gray-600 mt-0.5">
+                                                    Browse which days have concluded markets based on stored snapshots.
+                                                </p>
+                                            </div>
+                                            <button
+                                                onClick={() => toggleCalendar(group.group_id)}
+                                                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                                            >
+                                                {isCalendarOpen ? 'Hide Calendar' : 'Browse Calendar'}
+                                            </button>
+                                        </div>
+
+                                        {isCalendarOpen && (
+                                            <div className="mt-3">
+                                                {isCalendarLoading ? (
+                                                    <p className="text-xs text-gray-600">Loading calendar...</p>
+                                                ) : !calendar ? (
+                                                    <p className="text-xs text-gray-600">No calendar data.</p>
+                                                ) : (
+                                                    <>
+                                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                                            <div>
+                                                                <p className="text-sm font-semibold text-gray-900">{calendar.month_label}</p>
+                                                                <p className="text-xs text-gray-600 mt-0.5">
+                                                                    Closed markets indexed: {calendar.total_closed_markets}
+                                                                </p>
+                                                            </div>
+
+                                                            <div className="flex items-center gap-2">
+                                                                <button
+                                                                    onClick={() => moveCalendarMonth(group.group_id, 1)}
+                                                                    disabled={isCalendarLoading || currentMonthIndex <= 0}
+                                                                    className="px-2.5 py-1 rounded-md border border-gray-300 text-xs font-semibold text-gray-700 bg-white disabled:opacity-50"
+                                                                >
+                                                                    Newer
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => moveCalendarMonth(group.group_id, -1)}
+                                                                    disabled={
+                                                                        isCalendarLoading
+                                                                        || currentMonthIndex < 0
+                                                                        || currentMonthIndex >= calendar.available_months.length - 1
+                                                                    }
+                                                                    className="px-2.5 py-1 rounded-md border border-gray-300 text-xs font-semibold text-gray-700 bg-white disabled:opacity-50"
+                                                                >
+                                                                    Older
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-7 gap-1 mt-3 text-[11px] font-semibold text-gray-500">
+                                                            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((label) => (
+                                                                <div key={label} className="text-center py-1">{label}</div>
+                                                            ))}
+                                                        </div>
+
+                                                        <div className="grid grid-cols-7 gap-1 mt-1">
+                                                            {Array.from({ length: calendar.calendar_start_weekday }).map((_, index) => (
+                                                                <div key={`pad-${group.group_id}-${index}`} className="h-12 rounded-md bg-transparent" />
+                                                            ))}
+
+                                                            {Array.from({ length: calendar.days_in_month }).map((_, index) => {
+                                                                const dayNumber = index + 1;
+                                                                const dayKey = buildMonthDayKey(calendar.selected_month, dayNumber);
+                                                                const count = dayCountMap.get(dayKey) || 0;
+                                                                const isSelected = selectedDay === dayKey;
+
+                                                                return (
+                                                                    <button
+                                                                        key={dayKey}
+                                                                        onClick={() => setSelectedDayByGroupId((prev) => ({ ...prev, [group.group_id]: dayKey }))}
+                                                                        disabled={count === 0}
+                                                                        className={`h-12 rounded-md border px-1 py-1 text-left transition-colors ${count > 0
+                                                                            ? isSelected
+                                                                                ? 'border-blue-300 bg-blue-100'
+                                                                                : 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100'
+                                                                            : 'border-gray-200 bg-white text-gray-300'
+                                                                            }`}
+                                                                    >
+                                                                        <div className="text-[11px] font-semibold text-gray-800">{dayNumber}</div>
+                                                                        <div className="text-[10px] text-gray-600 mt-1">
+                                                                            {count > 0 ? `${count} mkts` : '-'}
+                                                                        </div>
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+
+                                                        <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+                                                            <p className="text-xs font-semibold text-gray-700">
+                                                                {selectedDay
+                                                                    ? `Markets concluded on ${formatDayLabel(selectedDay)}`
+                                                                    : 'Select a highlighted day to view markets'}
+                                                            </p>
+
+                                                            {selectedDay && selectedDayMarkets.length > 0 ? (
+                                                                <div className="mt-2 max-h-52 overflow-y-auto divide-y divide-gray-100">
+                                                                    {selectedDayMarkets.map((market) => (
+                                                                        <div key={market.market_id} className="py-2">
+                                                                            <p className="text-sm font-medium text-gray-900">{market.question || 'Untitled Market'}</p>
+                                                                            <p className="text-xs text-gray-600 mt-0.5">
+                                                                                {market.category || 'Other'} | {market.market_id}
+                                                                            </p>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            ) : (
+                                                                <p className="text-xs text-gray-500 mt-2">No concluded markets on selected day.</p>
+                                                            )}
+                                                        </div>
+                                                    </>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
 
                                     {group.markets.length > 0 && (

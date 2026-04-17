@@ -122,6 +122,18 @@ function normalizeSearchText(input: string): string {
     return input.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function escapeRegExp(input: string): string {
+    return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function keywordAsTermPattern(keyword: string): RegExp | null {
+    const normalized = normalizeSearchText(keyword);
+    if (!normalized) return null;
+
+    const escaped = escapeRegExp(normalized).replace(/\s+/g, "\\s+");
+    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i");
+}
+
 function marketMatchesKeywords(market: NormalizedGammaMarket, keywords: string[]): boolean {
     if (keywords.length === 0) return false;
 
@@ -130,8 +142,8 @@ function marketMatchesKeywords(market: NormalizedGammaMarket, keywords: string[]
     );
 
     return keywords.some((keyword) => {
-        const needle = normalizeSearchText(keyword);
-        return Boolean(needle) && haystack.includes(needle);
+        const pattern = keywordAsTermPattern(keyword);
+        return pattern ? pattern.test(haystack) : false;
     });
 }
 
@@ -308,6 +320,32 @@ export async function syncPolymarketGroups(prisma: PrismaClient, groups: Polymar
 
     for (const group of groups) {
         const matched = matchedByGroup.get(group.group_id) || [];
+        const matchedMarketIds = matched.map((market) => market.marketId);
+
+        if (matchedMarketIds.length > 0) {
+            await prisma.polymarketGroupedMarket.deleteMany({
+                where: {
+                    group_id: group.group_id,
+                    market_id: { notIn: matchedMarketIds },
+                },
+            });
+
+            await prisma.polymarketGroupedMarketSnapshot.deleteMany({
+                where: {
+                    group_id: group.group_id,
+                    market_id: { notIn: matchedMarketIds },
+                },
+            });
+        } else {
+            await prisma.polymarketGroupedMarket.deleteMany({
+                where: { group_id: group.group_id },
+            });
+
+            await prisma.polymarketGroupedMarketSnapshot.deleteMany({
+                where: { group_id: group.group_id },
+            });
+        }
+
         let snapshotsCreated = 0;
 
         for (const market of matched) {
