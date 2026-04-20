@@ -17,6 +17,11 @@ async function getUserInfo() {
 // ==================== Home Page ====================
 export default async function HomePage() {
   const { isLoggedIn, user } = await getUserInfo();
+  const role = String(user?.role || "").toLowerCase();
+
+  if (isLoggedIn && (role === "staff" || role === "admin")) {
+    redirect("/admin/ops");
+  }
 
   return (
     <div className="min-h-screen bg-white">

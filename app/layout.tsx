@@ -35,13 +35,15 @@ export default async function RootLayout({
 }>) {
   const { isLoggedIn, user } = await getAuthState();
   const userName = isLoggedIn && user ? (user.name || user.email) : undefined;
+  const role = String(user?.role || "").toLowerCase();
+  const isStaff = role === "staff" || role === "admin";
 
   return (
     <html lang="en" className="overflow-x-hidden">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50 overflow-x-hidden`}
       >
-        {isLoggedIn && <MainNav userName={userName} />}
+        {isLoggedIn && !isStaff && <MainNav userName={userName} />}
         <main className={`${isLoggedIn ? "p-6" : ""}`}>
           {children}
         </main>

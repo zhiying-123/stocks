@@ -24,7 +24,13 @@ export default function LoginUI() {
         return;
       }
 
-      // Redirect to stock platform
+      const role = String(result.user?.role || "").toLowerCase();
+      if (role === "staff" || role === "admin") {
+        window.location.href = "/admin/ops";
+        return;
+      }
+
+      // Default redirect for member users
       window.location.href = "/h_stocks";
     } catch {
       setLoading(false);
