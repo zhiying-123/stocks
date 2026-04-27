@@ -27,6 +27,25 @@ type CandidateMarket = {
     liquidity: number;
 };
 
+type BacktestRunSuccess = {
+    ok: true;
+    marketId: string;
+    clobTokenId: string;
+    group: string;
+    market: string;
+    netPnL: number;
+    returnPct: number;
+    tradesExecuted: number;
+    discordSent: boolean;
+};
+
+type BacktestRunFailure = {
+    ok: false;
+    error: string;
+};
+
+type BacktestRunResult = BacktestRunSuccess | BacktestRunFailure;
+
 function isStaffOrAdmin(role: string | undefined) {
     const normalized = String(role || "").toLowerCase();
     return normalized === "staff" || normalized === "admin";
@@ -182,7 +201,7 @@ async function getCandidateMarkets(limit: number) {
     return selected;
 }
 
-async function runBacktestForCandidate(origin: string, candidate: CandidateMarket) {
+async function runBacktestForCandidate(origin: string, candidate: CandidateMarket): Promise<BacktestRunResult> {
     const window = getDateWindow(45);
 
     const response = await fetch(`${origin}/api/polymarket/backtest-auto-buy-sell`, {
@@ -260,21 +279,12 @@ async function runBacktestForCandidate(origin: string, candidate: CandidateMarke
 
 async function runDailyBatch(origin: string, batchSize: number) {
     const candidates = await getCandidateMarkets(batchSize);
-    const completed: Array<{
-        marketId: string;
-        clobTokenId: string;
-        group: string;
-        market: string;
-        netPnL: number;
-        returnPct: number;
-        tradesExecuted: number;
-        discordSent: boolean;
-    }> = [];
+    const completed: BacktestRunSuccess[] = [];
     const failed: Array<{ marketId: string; clobTokenId: string; group: string; market: string; error: string }> = [];
 
     for (const candidate of candidates) {
         const result = await runBacktestForCandidate(origin, candidate);
-        if (result.ok) {
+        if (result.ok === true) {
             completed.push(result);
         } else {
             failed.push({

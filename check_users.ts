@@ -1,11 +1,11 @@
-﻿import { PrismaClient } from "./app/generated/prisma/client";
-const prisma = new PrismaClient({});
+﻿import prisma from "./lib/prisma";
 async function main() {
   try {
     const count = await prisma.user.count();
     console.log(`USER_COUNT: ${count}`);
   } catch (err) {
-    console.error(`DB_ERROR: ${err.message}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`DB_ERROR: ${message}`);
   } finally {
     // await prisma.$disconnect();
   }
