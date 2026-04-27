@@ -7,6 +7,10 @@
         {
             "path": "/api/stocks/auto-trader/check",
             "schedule": "35 1 * * *"
+        },
+        {
+            "path": "/api/polymarket/backtest-daily",
+            "schedule": "15 2 * * *"
         }
     ]
 }

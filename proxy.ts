@@ -10,7 +10,7 @@ function parseUserCookie(raw: string | undefined) {
     }
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
     const pathname = request.nextUrl.pathname;
 
     // Skip Next internals and static assets.

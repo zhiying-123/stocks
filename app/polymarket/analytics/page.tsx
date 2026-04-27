@@ -11,6 +11,57 @@ type MarketOption = {
     question: string;
 };
 
+const PRIORITY_MARKET_RULES = [
+    {
+        url: "https://polymarket.com/predictions/elon-tweets",
+        slugHints: ["elon-tweets"],
+        keywordHints: ["elon", "tweet"],
+    },
+    {
+        url: "https://polymarket.com/predictions/economic-policy",
+        slugHints: ["economic-policy"],
+        keywordHints: ["economic policy", "federal reserve", "interest rate", "inflation", "economy", "fed"],
+    },
+    {
+        url: "https://polymarket.com/predictions/nba",
+        slugHints: ["nba"],
+        keywordHints: ["nba", "basketball"],
+    },
+    {
+        url: "https://polymarket.com/pop-culture/movies",
+        slugHints: ["movies"],
+        keywordHints: ["movie", "movies", "box office", "film"],
+    },
+] as const;
+
+function normalizeText(value: string): string {
+    return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function getPriorityRank(texts: string[]): number | null {
+    const normalizedTexts = texts
+        .map((text) => normalizeText(String(text || "")))
+        .filter(Boolean);
+
+    for (let index = 0; index < PRIORITY_MARKET_RULES.length; index += 1) {
+        const rule = PRIORITY_MARKET_RULES[index];
+        const hasSlugHit = rule.slugHints.some((hint) =>
+            normalizedTexts.some((text) => text.includes(normalizeText(hint)))
+        );
+
+        const hasKeywordHit = rule.keywordHints.some((hint) => {
+            const normalizedHint = normalizeText(hint);
+            return normalizedTexts.some((text) => text.includes(normalizedHint));
+        });
+
+        if (hasSlugHit || hasKeywordHit) {
+            return index;
+        }
+    }
+
+    return null;
+}
+
 function parseStringArray(value: unknown): string[] {
     if (!value) return [];
     if (Array.isArray(value)) return value.map((item) => String(item));
@@ -28,6 +79,7 @@ function parseStringArray(value: unknown): string[] {
 async function fetchMarketOptions(preferredIds: string[]): Promise<MarketOption[]> {
     const preferredSet = new Set(preferredIds.filter(Boolean));
     const optionMap = new Map<string, MarketOption>();
+    const optionPriorityRank = new Map<string, number>();
 
     try {
         const response = await fetch(`${POLYMARKET_API}/events?limit=300&offset=0&closed=false`, {
@@ -55,10 +107,25 @@ async function fetchMarketOptions(preferredIds: string[]): Promise<MarketOption[
                             marketRecord.question || eventRecord.title || tokenId
                         ).trim();
 
+                        const priorityRank = getPriorityRank([
+                            question,
+                            String(eventRecord.title || ""),
+                            String(eventRecord.slug || ""),
+                            String(marketRecord.slug || ""),
+                            String(marketRecord.url || ""),
+                        ]);
+
                         optionMap.set(tokenId, {
                             id: tokenId,
                             question: question || tokenId,
                         });
+
+                        if (priorityRank !== null) {
+                            const existingRank = optionPriorityRank.get(tokenId);
+                            if (existingRank == null || priorityRank < existingRank) {
+                                optionPriorityRank.set(tokenId, priorityRank);
+                            }
+                        }
                     }
                 }
             }
@@ -75,6 +142,16 @@ async function fetchMarketOptions(preferredIds: string[]): Promise<MarketOption[
 
     const allOptions = Array.from(optionMap.values());
     allOptions.sort((left, right) => {
+        const leftPriorityRank = optionPriorityRank.get(left.id);
+        const rightPriorityRank = optionPriorityRank.get(right.id);
+
+        const leftIsPriority = leftPriorityRank !== undefined;
+        const rightIsPriority = rightPriorityRank !== undefined;
+        if (leftIsPriority !== rightIsPriority) return leftIsPriority ? -1 : 1;
+        if (leftIsPriority && rightIsPriority && leftPriorityRank !== rightPriorityRank) {
+            return (leftPriorityRank as number) - (rightPriorityRank as number);
+        }
+
         const leftPreferred = preferredSet.has(left.id) ? 1 : 0;
         const rightPreferred = preferredSet.has(right.id) ? 1 : 0;
         if (leftPreferred !== rightPreferred) return rightPreferred - leftPreferred;

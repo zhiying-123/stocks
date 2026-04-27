@@ -34,14 +34,43 @@ function parseStringArray(value: unknown): string[] {
   if (!value) return [];
   if (Array.isArray(value)) return value.map((item) => String(item));
   if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
     try {
-      const parsed = JSON.parse(value) as unknown;
+      const parsed = JSON.parse(trimmed) as unknown;
       return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
     } catch {
-      return [];
+      // Some Polymarket fields come as comma-delimited strings instead of JSON arrays.
+      if (trimmed.includes(",")) {
+        return trimmed
+          .split(",")
+          .map((item) => item.replaceAll(/^[\s"']+|[\s"']+$/g, "").trim())
+          .filter(Boolean);
+      }
+      return [trimmed.replaceAll(/^[\s"']+|[\s"']+$/g, "").trim()].filter(Boolean);
     }
   }
   return [];
+}
+
+function normalizeIdentifier(value: string): string {
+  return value.replaceAll(/^[\s"']+|[\s"']+$/g, "").trim();
+}
+
+function buildInputCandidates(inputId: string): string[] {
+  const normalized = normalizeIdentifier(inputId);
+  if (!normalized) return [];
+
+  const candidates = new Set<string>([normalized]);
+
+  // Accept market IDs accidentally passed as JSON arrays or comma-separated values.
+  for (const parsed of parseStringArray(normalized)) {
+    const item = normalizeIdentifier(parsed);
+    if (item) candidates.add(item);
+  }
+
+  return Array.from(candidates);
 }
 
 function parseDateToUnix(value: string, fieldName: string, endOfDay: boolean): number {
@@ -135,9 +164,9 @@ async function fetchHistoryForMarketId(marketId: string): Promise<PricePoint[]> 
   return normalizePriceHistory(raw);
 }
 
-async function resolveFromDirectMarketLookup(inputId: string): Promise<string | null> {
+async function resolveFromDirectMarketLookup(inputId: string): Promise<string[]> {
   const target = inputId.trim();
-  if (!target) return null;
+  if (!target) return [];
 
   try {
     const response = await fetch(`${GAMMA_API}/markets/${encodeURIComponent(target)}`, {
@@ -146,31 +175,38 @@ async function resolveFromDirectMarketLookup(inputId: string): Promise<string | 
     });
 
     if (!response.ok) {
-      return null;
+      return [];
     }
 
     const market = (await response.json()) as unknown;
-    if (!isRecord(market)) return null;
+    if (!isRecord(market)) return [];
 
     const clobIds = parseStringArray(market.clobTokenIds).map((id) => id.trim()).filter(Boolean);
-    if (clobIds.includes(target)) return target;
-    if (clobIds.length > 0) return clobIds[0];
+    if (clobIds.includes(target)) {
+      return [target, ...clobIds.filter((id) => id !== target)];
+    }
+
+    if (clobIds.length > 0) {
+      return clobIds;
+    }
 
     const conditionId = String(market.conditionId || "").trim();
-    if (conditionId === target) return target;
+    if (conditionId === target) {
+      return clobIds;
+    }
   } catch {
     // Fall through to event-scan resolver.
   }
 
-  return null;
+  return [];
 }
 
-async function resolveClobTokenId(inputId: string): Promise<string | null> {
-  const target = inputId.trim();
-  if (!target) return null;
+async function resolveClobTokenIds(inputId: string): Promise<string[]> {
+  const target = normalizeIdentifier(inputId);
+  if (!target) return [];
 
   const directResolved = await resolveFromDirectMarketLookup(target);
-  if (directResolved) {
+  if (directResolved.length > 0) {
     return directResolved;
   }
 
@@ -203,11 +239,11 @@ async function resolveClobTokenId(inputId: string): Promise<string | null> {
             const clobIds = parseStringArray(market.clobTokenIds).map((id) => id.trim()).filter(Boolean);
 
             if (clobIds.includes(target)) {
-              return target;
+              return [target, ...clobIds.filter((id) => id !== target)];
             }
 
             if (target === marketId || target === conditionId) {
-              return clobIds[0] || null;
+              return clobIds;
             }
           }
         }
@@ -217,22 +253,22 @@ async function resolveClobTokenId(inputId: string): Promise<string | null> {
     }
   }
 
-  return null;
+  return [];
 }
 
 async function fetchPolymarketHistory(marketId: string): Promise<{ points: PricePoint[]; resolvedMarketId: string }> {
-  const candidateIds: string[] = [];
-  const normalizedInput = marketId.trim();
-  if (normalizedInput) {
-    candidateIds.push(normalizedInput);
+  const candidateIds = new Set<string>();
+  const rawCandidates = buildInputCandidates(marketId);
+
+  for (const rawCandidate of rawCandidates) {
+    candidateIds.add(rawCandidate);
+    const resolvedTokenIds = await resolveClobTokenIds(rawCandidate);
+    for (const resolvedTokenId of resolvedTokenIds) {
+      candidateIds.add(normalizeIdentifier(resolvedTokenId));
+    }
   }
 
-  const resolvedTokenId = await resolveClobTokenId(marketId);
-  if (resolvedTokenId) {
-    candidateIds.unshift(resolvedTokenId);
-  }
-
-  for (const candidate of Array.from(new Set(candidateIds))) {
+  for (const candidate of candidateIds) {
     if (!candidate) continue;
     const points = await fetchHistoryForMarketId(candidate);
     if (points.length > 0) {
@@ -240,7 +276,12 @@ async function fetchPolymarketHistory(marketId: string): Promise<{ points: Price
     }
   }
 
-  throw new Error("Polymarket history returned no usable price points for this market identifier");
+  const tried = Array.from(candidateIds).slice(0, 8).join(", ");
+  throw new Error(
+    tried
+      ? `No historical price data is available for this market yet (tried: ${tried}). This usually means the market has no recorded trade history on CLOB, so backtest cannot run.`
+      : "No historical price data is available for this market yet. This usually means the market has no recorded trade history on CLOB, so backtest cannot run."
+  );
 }
 
 function calcMaxDrawdown(equityCurve: number[]): number {

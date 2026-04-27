@@ -7,6 +7,20 @@ type ShareBacktestPayload = {
     lines?: string[];
 };
 
+function extractLineValue(lines: string[], prefix: string) {
+    const lowerPrefix = prefix.toLowerCase();
+    const raw = lines.find((line) => line.toLowerCase().startsWith(lowerPrefix));
+    if (!raw) return '';
+    return raw.slice(prefix.length).trim();
+}
+
+function extractBulletValue(lines: string[], prefix: string) {
+    const lowerPrefix = prefix.toLowerCase();
+    const raw = lines.find((line) => line.toLowerCase().startsWith(lowerPrefix));
+    if (!raw) return '';
+    return raw.slice(prefix.length).trim();
+}
+
 export async function POST(request: NextRequest) {
     try {
         const cookieStore = await cookies();
@@ -32,10 +46,45 @@ export async function POST(request: NextRequest) {
         }
 
         const requesterLine = `Requested by: ${user.name || user.email || `User ${user.id}`}`;
+        const generatedAt = extractLineValue(lines, 'Generated (UTC):');
+        const market = extractLineValue(lines, 'Market:');
+        const detailPage = extractLineValue(lines, 'Detail Page:');
+        const window = extractBulletValue(lines, '- Window:');
+        const setup = extractBulletValue(lines, '- Setup:');
+        const netPnl = extractBulletValue(lines, '- Net PnL:');
+        const finalEquity = extractBulletValue(lines, '- Final Equity:');
+        const vsBuyHold = extractBulletValue(lines, '- Vs Buy & Hold:');
+        const trades = extractBulletValue(lines, '- Trades:');
+        const maxDrawdown = extractBulletValue(lines, '- Max Drawdown:');
+
+        const descriptionParts = [
+            generatedAt ? `Generated: ${generatedAt}` : '',
+            market ? `Market: ${market}` : '',
+            window ? `Window: ${window}` : '',
+            setup ? `Setup: ${setup}` : '',
+            detailPage && detailPage !== 'N/A' ? `[Open Detail Page](${detailPage})` : '',
+        ].filter(Boolean);
+
+        const fields: Array<{ name: string; value: string; inline?: boolean }> = [];
+        if (netPnl) fields.push({ name: 'Net PnL', value: netPnl, inline: true });
+        if (finalEquity) fields.push({ name: 'Final Equity', value: finalEquity, inline: true });
+        if (vsBuyHold) fields.push({ name: 'Vs Buy & Hold', value: vsBuyHold, inline: true });
+        if (trades) fields.push({ name: 'Trades', value: trades, inline: false });
+        if (maxDrawdown) fields.push({ name: 'Max Drawdown', value: maxDrawdown, inline: true });
+
         const sent = await sendDiscordMessage({
             title,
             lines: [...lines.slice(0, 18), requesterLine],
-            mention: false,
+            mention: true,
+            embed: {
+                title,
+                url: detailPage && detailPage !== 'N/A' ? detailPage : undefined,
+                description: descriptionParts.join('\n'),
+                color: 0x22c55e,
+                fields,
+                footerText: requesterLine,
+                timestamp: new Date().toISOString(),
+            },
         });
 
         if (!sent) {

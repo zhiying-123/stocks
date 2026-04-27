@@ -62,6 +62,9 @@ export default async function AdminLayout({
             <Link href="/admin/ops/users/analytics" className="block rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
               User Analytics
             </Link>
+            <Link href="/admin/ops/backtests" className="block rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100">
+              Backtest Automation
+            </Link>
           </nav>
         </aside>
 

@@ -10,9 +10,31 @@ type SendDiscordMessageInput = {
     title: string;
     lines: string[];
     mention?: boolean;
+    embed?: {
+        title?: string;
+        url?: string;
+        description?: string;
+        color?: number;
+        fields?: Array<{ name: string; value: string; inline?: boolean }>;
+        footerText?: string;
+        timestamp?: string;
+    };
 };
 
-async function sendDiscordContent(content: string) {
+type DiscordWebhookPayload = {
+    content?: string;
+    embeds?: Array<{
+        title?: string;
+        url?: string;
+        description?: string;
+        color?: number;
+        fields?: Array<{ name: string; value: string; inline?: boolean }>;
+        footer?: { text: string };
+        timestamp?: string;
+    }>;
+};
+
+async function sendDiscordPayload(payload: DiscordWebhookPayload) {
     const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
     if (!webhookUrl) {
         return false;
@@ -23,7 +45,7 @@ async function sendDiscordContent(content: string) {
         headers: {
             "Content-Type": "application/json",
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
@@ -34,10 +56,28 @@ async function sendDiscordContent(content: string) {
     return true;
 }
 
-export async function sendDiscordMessage({ title, lines, mention = true }: SendDiscordMessageInput) {
+export async function sendDiscordMessage({ title, lines, mention = true, embed }: SendDiscordMessageInput) {
     const mentionText = mention ? process.env.DISCORD_MENTION || "" : "";
+
+    if (embed) {
+        const webhookEmbed = {
+            title: embed.title || title,
+            url: embed.url,
+            description: embed.description,
+            color: embed.color,
+            fields: embed.fields,
+            footer: embed.footerText ? { text: embed.footerText } : undefined,
+            timestamp: embed.timestamp,
+        };
+
+        return sendDiscordPayload({
+            content: mentionText || undefined,
+            embeds: [webhookEmbed],
+        });
+    }
+
     const content = [mentionText, title, ...lines].filter(Boolean).join("\n");
-    return sendDiscordContent(content);
+    return sendDiscordPayload({ content });
 }
 
 export async function sendDiscordAlert({
@@ -60,5 +100,5 @@ export async function sendDiscordAlert({
         userLabel,
     ].filter(Boolean).join("\n");
 
-    return sendDiscordContent(content);
+    return sendDiscordPayload({ content });
 }

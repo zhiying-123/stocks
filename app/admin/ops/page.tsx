@@ -238,9 +238,12 @@ export default async function OpsDashboardPage() {
             <h3 className="mt-2 text-xl font-semibold text-slate-900">API & Job Status</h3>
             <p className="mt-2 text-sm text-slate-600">Observe critical APIs and scheduled task execution health.</p>
             <div className="mt-5">
-              <span className="inline-flex items-center rounded-xl border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600">
-                Coming Soon
-              </span>
+              <Link
+                href="/admin/ops/backtests"
+                className="inline-flex items-center rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 transition hover:bg-indigo-100"
+              >
+                Run Backtest Batch
+              </Link>
             </div>
           </article>
         </div>
