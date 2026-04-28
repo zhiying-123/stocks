@@ -6,6 +6,8 @@ import SocialPanel from './SocialPanel';
 import CustomSelect from '@/app/components/CustomSelect';
 
 type TimeRange = '1D' | '1W' | '1M' | 'ALL';
+type ChartSeriesMode = 'BOTH' | 'YES' | 'NO';
+type ChartLabelMode = 'YES_NO' | 'BUY_SELL';
 
 interface NormalizedPoint {
     time: Date;
@@ -94,6 +96,9 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
     const [alertSubmitting, setAlertSubmitting] = useState(false);
     const [alertMessage, setAlertMessage] = useState('');
     const [alertError, setAlertError] = useState('');
+    const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
+    const [chartSeriesMode, setChartSeriesMode] = useState<ChartSeriesMode>('BOTH');
+    const [chartLabelMode, setChartLabelMode] = useState<ChartLabelMode>('YES_NO');
 
     // Fetch price history
     useEffect(() => {
@@ -211,9 +216,11 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
     const chartData = useMemo(() => {
         if (filteredHistory.length === 0) return null;
 
-        const prices = filteredHistory.map(p => p.price * 100); // Convert to %
-        const rawMin = Math.min(...prices);
-        const rawMax = Math.max(...prices);
+        const yesPrices = filteredHistory.map((p) => p.price * 100);
+        const noPrices = yesPrices.map((price) => 100 - price);
+        const combinedPrices = [...yesPrices, ...noPrices];
+        const rawMin = Math.min(...combinedPrices);
+        const rawMax = Math.max(...combinedPrices);
 
         // Round to nice Y-axis ticks (multiples of 5% or 10%)
         const step = rawMax - rawMin > 30 ? 10 : 5;
@@ -233,19 +240,33 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
         const chartH = H - padTop - padBottom;
         const yRange = yMax - yMin || 1;
 
-        // Build SVG path
-        const pathParts = filteredHistory.map((point, idx) => {
+        // Build SVG path and point coordinates for both YES and NO lines.
+        const pointData = filteredHistory.map((point, idx) => {
             const x = padLeft + (idx / Math.max(filteredHistory.length - 1, 1)) * chartW;
-            const y = padTop + chartH - ((point.price * 100 - yMin) / yRange) * chartH;
-            return `${idx === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-        });
-        const linePath = pathParts.join(' ');
+            const yesValue = point.price * 100;
+            const noValue = 100 - yesValue;
+            const yesY = padTop + chartH - ((yesValue - yMin) / yRange) * chartH;
+            const noY = padTop + chartH - ((noValue - yMin) / yRange) * chartH;
 
-        // Area fill path (line + close to bottom)
+            return {
+                x,
+                yesValue,
+                noValue,
+                yesY,
+                noY,
+                time: point.time,
+                volume: point.volume,
+            };
+        });
+
+        const yesLinePath = pointData.map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.yesY.toFixed(1)}`).join(' ');
+        const noLinePath = pointData.map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.noY.toFixed(1)}`).join(' ');
+
+        // Area fill path (YES line + close to bottom)
         const lastX = padLeft + chartW;
         const firstX = padLeft;
         const bottomY = padTop + chartH;
-        const areaPath = linePath + ` L ${lastX.toFixed(1)} ${bottomY} L ${firstX} ${bottomY} Z`;
+        const areaPath = yesLinePath + ` L ${lastX.toFixed(1)} ${bottomY} L ${firstX} ${bottomY} Z`;
 
         // X-axis date labels
         const xLabels: { x: number; label: string }[] = [];
@@ -275,8 +296,42 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
             label: `${v}%`,
         }));
 
-        return { linePath, areaPath, xLabels, yLines, W, H, padLeft, padRight, padTop, padBottom, chartW, chartH, bottomY };
+        return { pointData, yesLinePath, noLinePath, areaPath, xLabels, yLines, W, H, padLeft, padRight, padTop, padBottom, chartW, chartH, bottomY };
     }, [filteredHistory, timeRange]);
+
+    const hoveredPoint = hoveredPointIndex != null ? chartData?.pointData[hoveredPointIndex] : null;
+
+    const chartSeriesLabels = useMemo(() => {
+        if (chartLabelMode === 'BUY_SELL') {
+            return { primary: 'Buy', secondary: 'Sell' };
+        }
+
+        return { primary: 'Yes', secondary: 'No' };
+    }, [chartLabelMode]);
+
+    const chartTitle = chartSeriesMode === 'YES'
+        ? chartSeriesLabels.primary
+        : chartSeriesMode === 'NO'
+            ? chartSeriesLabels.secondary
+            : 'Yes / No';
+
+    function handleChartPointerMove(event: React.PointerEvent<SVGSVGElement>) {
+        if (!chartData || chartData.pointData.length === 0) return;
+
+        const rect = event.currentTarget.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const closestIndex = chartData.pointData.reduce((bestIndex, point, index) => {
+            const bestDistance = Math.abs(chartData.pointData[bestIndex].x - x);
+            const currentDistance = Math.abs(point.x - x);
+            return currentDistance < bestDistance ? index : bestIndex;
+        }, 0);
+
+        setHoveredPointIndex(closestIndex);
+    }
+
+    function handleChartPointerLeave() {
+        setHoveredPointIndex(null);
+    }
 
     // Format volume nicely
     const formatVol = (v?: number) => {
@@ -686,96 +741,202 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                             {/* SVG Chart with axes */}
                             <div className="w-full mt-4">
                                 {chartData ? (
-                                    <svg
-                                        viewBox={`0 0 ${chartData.W} ${chartData.H}`}
-                                        className="w-full"
-                                        style={{ height: 280 }}
-                                        preserveAspectRatio="xMidYMid meet"
-                                    >
-                                        {/* Horizontal grid lines + Y-axis labels */}
-                                        {chartData.yLines.map((line, i) => (
-                                            <g key={i}>
-                                                <line
-                                                    x1={chartData.padLeft}
-                                                    y1={line.y}
-                                                    x2={chartData.W - chartData.padRight}
-                                                    y2={line.y}
-                                                    stroke="#E5E7EB"
-                                                    strokeWidth="1"
-                                                    strokeDasharray="4 4"
+                                    <div className="relative">
+                                        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                                            <div className="text-sm font-semibold text-slate-900">
+                                                Price chart · <span className="text-slate-500">{chartTitle}</span>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1">
+                                                    {(['BOTH', 'YES', 'NO'] as const).map((mode) => {
+                                                        const active = chartSeriesMode === mode;
+                                                        const base = 'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors';
+                                                        let modeClass = 'text-slate-500 hover:text-slate-900';
+                                                        if (active) {
+                                                            if (mode === 'BOTH') modeClass = 'bg-slate-100 text-slate-900 shadow-sm';
+                                                            if (mode === 'YES') modeClass = 'bg-blue-100 text-blue-800 shadow-sm';
+                                                            if (mode === 'NO') modeClass = 'bg-orange-100 text-orange-800 shadow-sm';
+                                                        }
+                                                        return (
+                                                            <button
+                                                                key={mode}
+                                                                type="button"
+                                                                onClick={() => setChartSeriesMode(mode)}
+                                                                className={`${base} ${modeClass}`}
+                                                            >
+                                                                {mode === 'BOTH' ? 'Both' : mode}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1">
+                                                    {(['YES_NO', 'BUY_SELL'] as const).map((mode) => {
+                                                        const active = chartLabelMode === mode;
+                                                        const base = 'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors';
+                                                        const labelClass = active
+                                                            ? mode === 'BUY_SELL'
+                                                                ? 'bg-violet-100 text-violet-800 shadow-sm'
+                                                                : 'bg-indigo-100 text-indigo-800 shadow-sm'
+                                                            : 'text-slate-500 hover:text-slate-900';
+                                                        return (
+                                                            <button
+                                                                key={mode}
+                                                                type="button"
+                                                                onClick={() => setChartLabelMode(mode)}
+                                                                className={`${base} ${labelClass}`}
+                                                            >
+                                                                {mode === 'YES_NO' ? 'Yes / No' : 'Buy / Sell'}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <svg
+                                            viewBox={`0 0 ${chartData.W} ${chartData.H}`}
+                                            className="w-full"
+                                            style={{ height: 280 }}
+                                            preserveAspectRatio="xMidYMid meet"
+                                            onPointerMove={handleChartPointerMove}
+                                            onPointerLeave={handleChartPointerLeave}
+                                        >
+                                            <defs>
+                                                <linearGradient id="yesAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="0%" stopColor="#2563eb" stopOpacity="0.24" />
+                                                    <stop offset="100%" stopColor="#2563eb" stopOpacity="0" />
+                                                </linearGradient>
+                                            </defs>
+
+                                            {/* Horizontal grid lines + Y-axis labels */}
+                                            {chartData.yLines.map((line, i) => (
+                                                <g key={i}>
+                                                    <line
+                                                        x1={chartData.padLeft}
+                                                        y1={line.y}
+                                                        x2={chartData.W - chartData.padRight}
+                                                        y2={line.y}
+                                                        stroke="#E5E7EB"
+                                                        strokeWidth="1"
+                                                        strokeDasharray="4 4"
+                                                    />
+                                                    <text
+                                                        x={chartData.W - chartData.padRight + 8}
+                                                        y={line.y + 4}
+                                                        fill="#9CA3AF"
+                                                        fontSize="11"
+                                                        fontFamily="system-ui, sans-serif"
+                                                    >
+                                                        {line.label}
+                                                    </text>
+                                                </g>
+                                            ))}
+
+                                            {/* Area fill under YES line */}
+                                            {chartSeriesMode !== 'NO' ? (
+                                                <path d={chartData.areaPath} fill="url(#yesAreaGrad)" opacity="0.22" />
+                                            ) : null}
+
+                                            {/* YES line */}
+                                            {chartSeriesMode !== 'NO' ? (
+                                                <path
+                                                    d={chartData.yesLinePath}
+                                                    fill="none"
+                                                    stroke="#2563eb"
+                                                    strokeWidth="2"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
                                                 />
+                                            ) : null}
+
+                                            {/* NO line */}
+                                            {chartSeriesMode !== 'YES' ? (
+                                                <path
+                                                    d={chartData.noLinePath}
+                                                    fill="none"
+                                                    stroke="#f97316"
+                                                    strokeWidth="2"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeDasharray="6 4"
+                                                    opacity="0.95"
+                                                />
+                                            ) : null}
+
+                                            {/* Hover marker */}
+                                            {hoveredPoint ? (
+                                                <g>
+                                                    <line
+                                                        x1={hoveredPoint.x}
+                                                        y1={chartData.padTop}
+                                                        x2={hoveredPoint.x}
+                                                        y2={chartData.padTop + chartData.chartH}
+                                                        stroke="#94A3B8"
+                                                        strokeWidth="1"
+                                                        strokeDasharray="3 4"
+                                                    />
+                                                    {chartSeriesMode !== 'NO' ? (
+                                                        <>
+                                                            <circle cx={hoveredPoint.x} cy={hoveredPoint.yesY} r="5" fill="#2563eb" />
+                                                            <circle cx={hoveredPoint.x} cy={hoveredPoint.yesY} r="2.5" fill="white" />
+                                                        </>
+                                                    ) : null}
+                                                    {chartSeriesMode !== 'YES' ? (
+                                                        <>
+                                                            <circle cx={hoveredPoint.x} cy={hoveredPoint.noY} r="5" fill="#f97316" />
+                                                            <circle cx={hoveredPoint.x} cy={hoveredPoint.noY} r="2.5" fill="white" />
+                                                        </>
+                                                    ) : null}
+                                                </g>
+                                            ) : null}
+
+                                            {/* X-axis date labels */}
+                                            {chartData.xLabels.map((label, i) => (
                                                 <text
-                                                    x={chartData.W - chartData.padRight + 8}
-                                                    y={line.y + 4}
+                                                    key={i}
+                                                    x={label.x}
+                                                    y={chartData.H - 5}
                                                     fill="#9CA3AF"
                                                     fontSize="11"
                                                     fontFamily="system-ui, sans-serif"
+                                                    textAnchor="middle"
                                                 >
-                                                    {line.label}
+                                                    {label.label}
                                                 </text>
-                                            </g>
-                                        ))}
+                                            ))}
+                                        </svg>
 
-                                        {/* Area fill under the line */}
-                                        <path
-                                            d={chartData.areaPath}
-                                            fill="url(#areaGrad)"
-                                            opacity="0.15"
-                                        />
-
-                                        {/* Gradient definitions */}
-                                        <defs>
-                                            <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stopColor="#374151" stopOpacity="0.3" />
-                                                <stop offset="100%" stopColor="#374151" stopOpacity="0" />
-                                            </linearGradient>
-                                        </defs>
-
-                                        {/* Price line - clean and simple */}
-                                        <path
-                                            d={chartData.linePath}
-                                            fill="none"
-                                            stroke="#374151"
-                                            strokeWidth="1.5"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                        />
-
-                                        {/* Current price dot - simple style */}
-                                        {filteredHistory.length > 0 && (() => {
-                                            const last = filteredHistory[filteredHistory.length - 1];
-                                            const prices = filteredHistory.map(p => p.price * 100);
-                                            const rawMin = Math.min(...prices);
-                                            const rawMax = Math.max(...prices);
-                                            const step = rawMax - rawMin > 30 ? 10 : 5;
-                                            const yMin = Math.max(0, Math.floor(rawMin / step) * step);
-                                            const yMax = Math.min(100, Math.ceil(rawMax / step) * step + step);
-                                            const yRange = yMax - yMin || 1;
-                                            const x = chartData.padLeft + chartData.chartW;
-                                            const y = chartData.padTop + chartData.chartH - ((last.price * 100 - yMin) / yRange) * chartData.chartH;
-                                            return (
-                                                <g>
-                                                    <circle cx={x} cy={y} r="4" fill="#374151" />
-                                                    <circle cx={x} cy={y} r="2" fill="white" />
-                                                </g>
-                                            );
-                                        })()}
-
-                                        {/* X-axis date labels */}
-                                        {chartData.xLabels.map((label, i) => (
-                                            <text
-                                                key={i}
-                                                x={label.x}
-                                                y={chartData.H - 5}
-                                                fill="#9CA3AF"
-                                                fontSize="11"
-                                                fontFamily="system-ui, sans-serif"
-                                                textAnchor="middle"
+                                        {hoveredPoint ? (
+                                            <div
+                                                className="pointer-events-none absolute z-10 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-lg"
+                                                style={{
+                                                    left: `${Math.min(Math.max(hoveredPoint.x, 70), chartData.W - 80)}px`,
+                                                    top: `${Math.max(hoveredPoint.yesY - 78, 10)}px`,
+                                                    transform: 'translate(-50%, 0)',
+                                                }}
                                             >
-                                                {label.label}
-                                            </text>
-                                        ))}
-                                    </svg>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                    {hoveredPoint.time.toLocaleString()}
+                                                </div>
+                                                <div className="mt-1 flex items-center gap-3 text-sm font-semibold text-slate-900">
+                                                    {chartSeriesMode !== 'NO' ? (
+                                                        <span className="inline-flex items-center gap-1.5">
+                                                            <span className="h-2.5 w-2.5 rounded-full bg-blue-600" />
+                                                            {chartSeriesLabels.primary} {hoveredPoint.yesValue.toFixed(1)}%
+                                                        </span>
+                                                    ) : null}
+                                                    {chartSeriesMode !== 'YES' ? (
+                                                        <span className="inline-flex items-center gap-1.5">
+                                                            <span className="h-2.5 w-2.5 rounded-full bg-orange-500" />
+                                                            {chartSeriesLabels.secondary} {hoveredPoint.noValue.toFixed(1)}%
+                                                        </span>
+                                                    ) : null}
+                                                </div>
+                                                {typeof hoveredPoint.volume === 'number' ? (
+                                                    <div className="mt-1 text-xs text-slate-500">Volume {hoveredPoint.volume.toFixed(0)}</div>
+                                                ) : null}
+                                            </div>
+                                        ) : null}
+                                    </div>
                                 ) : (
                                     <div className="h-64 bg-gray-50 rounded-xl flex items-center justify-center text-gray-400 text-sm">
                                         {loading ? 'Loading chart data...' : 'No chart data available'}
@@ -783,8 +944,19 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                 )}
                             </div>
 
+                            <div className="mt-3 flex items-center gap-4 text-xs text-slate-500">
+                                <span className="inline-flex items-center gap-1.5">
+                                    <span className="h-2.5 w-2.5 rounded-full bg-blue-600" />
+                                    Yes line
+                                </span>
+                                <span className="inline-flex items-center gap-1.5">
+                                    <span className="h-2.5 w-2.5 rounded-full bg-orange-500" />
+                                    No line
+                                </span>
+                            </div>
+
                             {/* Bottom: Volume + End Date */}
-                            <div className="mt-3 flex items-center gap-3 text-xs text-gray-500">
+                            <div className="mt-2 flex items-center gap-3 text-xs text-gray-500">
                                 <span className="font-medium text-gray-700">{formatVol(marketInfo.volume)} Volume</span>
                                 <span>·</span>
                                 <span>{totalTrades} data points</span>

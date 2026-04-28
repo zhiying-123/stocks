@@ -2,11 +2,12 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { sendDiscordMessage } from "@/lib/discord";
+import runBacktest from "@/lib/backtest-runner";
 import { ensureDefaultPolymarketGroups, syncPolymarketGroups } from "@/lib/polymarket-groups";
 
 const PRIORITY_GROUP_SLUGS = ["nba", "elon-tweets", "economic-policy", "movies"] as const;
 const DEFAULT_DAILY_BATCH_SIZE = 12;
-const MIN_DAILY_BATCH_SIZE = 10;
+const MIN_DAILY_BATCH_SIZE = 5;
 const MAX_DAILY_BATCH_SIZE = 20;
 
 type StaffUser = {
@@ -25,6 +26,11 @@ type CandidateMarket = {
     isClosed: boolean;
     volume: number;
     liquidity: number;
+};
+
+type DailyBatchPlan = {
+    candidates: CandidateMarket[];
+    excludedCount: number;
 };
 
 type BacktestRunSuccess = {
@@ -60,6 +66,14 @@ function normalizeBatchSize(raw: unknown) {
     return rounded;
 }
 
+function parseExcludedTokenIds(raw: unknown) {
+    if (!Array.isArray(raw)) return [] as string[];
+
+    return raw
+        .map((value) => String(value || "").trim())
+        .filter((value) => Boolean(value));
+}
+
 function getDateWindow(daysBack: number) {
     const end = new Date();
     const start = new Date(end);
@@ -88,13 +102,60 @@ function getGroupPriority(slug: string) {
     return index >= 0 ? index : PRIORITY_GROUP_SLUGS.length;
 }
 
-async function getCandidateMarkets(limit: number) {
+function pickBalancedCandidateMarkets(candidates: CandidateMarket[], limit: number) {
+    if (limit <= 0 || candidates.length === 0) {
+        return [] as CandidateMarket[];
+    }
+
+    const uniqueByClobToken = new Set<string>();
+    const groupedCandidates = new Map<string, CandidateMarket[]>();
+
+    for (const candidate of candidates) {
+        if (uniqueByClobToken.has(candidate.clobTokenId)) continue;
+        uniqueByClobToken.add(candidate.clobTokenId);
+
+        const existing = groupedCandidates.get(candidate.groupSlug) || [];
+        existing.push(candidate);
+        groupedCandidates.set(candidate.groupSlug, existing);
+    }
+
+    const orderedGroups = PRIORITY_GROUP_SLUGS.map((slug) => ({
+        slug,
+        candidates: groupedCandidates.get(slug) || [],
+    })).filter((group) => group.candidates.length > 0);
+
+    const selected: CandidateMarket[] = [];
+
+    for (let round = 0; selected.length < limit; round += 1) {
+        let addedAny = false;
+
+        for (const group of orderedGroups) {
+            const nextCandidate = group.candidates[round];
+            if (!nextCandidate) continue;
+
+            selected.push(nextCandidate);
+            addedAny = true;
+
+            if (selected.length >= limit) {
+                break;
+            }
+        }
+
+        if (!addedAny) {
+            break;
+        }
+    }
+
+    return selected;
+}
+
+async function loadCandidateMarkets(syncFirst: boolean, activeGroupSlugs: string[] = [...PRIORITY_GROUP_SLUGS]) {
     await ensureDefaultPolymarketGroups(prisma);
 
     const groups = await prisma.polymarketMarketGroup.findMany({
         where: {
             slug: {
-                in: [...PRIORITY_GROUP_SLUGS],
+                in: activeGroupSlugs,
             },
         },
         orderBy: [{ is_system: "desc" }, { created_at: "asc" }],
@@ -104,7 +165,9 @@ async function getCandidateMarkets(limit: number) {
         return [] as CandidateMarket[];
     }
 
-    await syncPolymarketGroups(prisma, groups);
+    if (syncFirst) {
+        await syncPolymarketGroups(prisma, groups);
+    }
 
     const groupIds = groups.map((group) => group.group_id);
 
@@ -188,29 +251,66 @@ async function getCandidateMarkets(limit: number) {
         return left.question.localeCompare(right.question);
     });
 
-    const uniqueByClobToken = new Set<string>();
-    const selected: CandidateMarket[] = [];
+    return candidates;
+}
+
+async function getCandidateMarkets(limit: number, activeGroupSlugs: string[] = [...PRIORITY_GROUP_SLUGS]) {
+    const candidates = await loadCandidateMarkets(true, activeGroupSlugs);
+    return pickBalancedCandidateMarkets(candidates, limit);
+}
+
+async function getCachedCandidateMarkets(limit: number, activeGroupSlugs: string[] = [...PRIORITY_GROUP_SLUGS]) {
+    const candidates = await loadCandidateMarkets(false, activeGroupSlugs);
+    return pickBalancedCandidateMarkets(candidates, limit);
+}
+
+async function getDailyBatchPlan(
+    limit: number,
+    excludedClobTokenIds: string[] = [],
+    groupFilters: string[] = [...PRIORITY_GROUP_SLUGS],
+): Promise<DailyBatchPlan> {
+    const excludedSet = new Set(excludedClobTokenIds.map((value) => value.trim()).filter(Boolean));
+    const candidates = await getCandidateMarkets(limit + excludedSet.size + 20, groupFilters);
+    const planned: CandidateMarket[] = [];
 
     for (const candidate of candidates) {
-        if (uniqueByClobToken.has(candidate.clobTokenId)) continue;
-        uniqueByClobToken.add(candidate.clobTokenId);
-        selected.push(candidate);
-        if (selected.length >= limit) break;
+        if (excludedSet.has(candidate.clobTokenId)) continue;
+        planned.push(candidate);
+        if (planned.length >= limit) break;
     }
 
-    return selected;
+    return {
+        candidates: planned,
+        excludedCount: excludedSet.size,
+    };
+}
+
+async function getDailyBatchPreview(
+    limit: number,
+    excludedClobTokenIds: string[] = [],
+    groupFilters: string[] = [...PRIORITY_GROUP_SLUGS],
+): Promise<DailyBatchPlan> {
+    const excludedSet = new Set(excludedClobTokenIds.map((value) => value.trim()).filter(Boolean));
+    const candidates = await getCachedCandidateMarkets(limit + excludedSet.size + 20, groupFilters);
+    const planned: CandidateMarket[] = [];
+
+    for (const candidate of candidates) {
+        if (excludedSet.has(candidate.clobTokenId)) continue;
+        planned.push(candidate);
+        if (planned.length >= limit) break;
+    }
+
+    return {
+        candidates: planned,
+        excludedCount: excludedSet.size,
+    };
 }
 
 async function runBacktestForCandidate(origin: string, candidate: CandidateMarket): Promise<BacktestRunResult> {
     const window = getDateWindow(45);
 
-    const response = await fetch(`${origin}/api/polymarket/backtest-auto-buy-sell`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
-        cache: "no-store",
-        body: JSON.stringify({
+    try {
+        const payload = await runBacktest({
             marketId: candidate.clobTokenId,
             action: "BOTH",
             triggerType: "PRICE_TARGET",
@@ -223,91 +323,113 @@ async function runBacktestForCandidate(origin: string, candidate: CandidateMarke
             initialCash: 1000,
             initialPosition: 0,
             mode: "repeat",
-        }),
-    });
+        } as any);
 
-    const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        result?: {
-            netPnL?: number;
-            returnPct?: number;
-            tradesExecuted?: number;
-            buyTrades?: number;
-            sellTrades?: number;
-        };
-    };
+        if (!payload || !(payload as any).ok) {
+            return { ok: false, error: (payload as any)?.error || "Backtest failed" };
+        }
 
-    if (!response.ok || !payload.result) {
+        const result = (payload as any).result || {};
+        const netPnL = Number(result.netPnL || 0);
+        const returnPct = Number(result.returnPct || 0);
+        const tradesExecuted = Number(result.tradesExecuted || result.tradesExecuted || 0);
+        const buyTrades = Number(result.buyTrades || 0);
+        const sellTrades = Number(result.sellTrades || 0);
+
+        const finalEquity = Number(((result?.finalEquity) ?? (1000 + netPnL)).toFixed?.() ?? (1000 + netPnL));
+        const vsBuyAndHold = Number((result?.vsBuyAndHoldPct ?? 0) as number);
+        const maxDrawdown = Number((result?.maxDrawdownPct ?? 0) as number);
+
+        const discordSent = await sendDiscordMessage({
+            title: "Polymarket Backtest Completed (Auto)",
+            lines: [],
+            mention: false,
+            embed: {
+                title: `Polymarket Backtest Completed (Auto)`,
+                url: `${origin}/polymarket/market/${encodeURIComponent(candidate.clobTokenId)}`,
+                description: `This is a daily automated recommendation.`,
+                color: 3066993,
+                fields: [
+                    { name: "Generated", value: new Date().toISOString(), inline: false },
+                    { name: "Market", value: candidate.question, inline: false },
+                    { name: "Window", value: `${window.start} to ${window.end}`, inline: false },
+                    { name: "Setup", value: `BOTH | PRICE_TARGET | mode=repeat`, inline: false },
+                    { name: "Net PnL", value: `${netPnL >= 0 ? "+" : ""}${netPnL.toFixed(2)} (${returnPct.toFixed(2)}%)`, inline: true },
+                    { name: "Final Equity", value: `${Number(finalEquity).toFixed(2)}`, inline: true },
+                    { name: "Vs Buy & Hold", value: `${Number(vsBuyAndHold).toFixed(2)} pp`, inline: true },
+                    { name: "Trades", value: `executed=${tradesExecuted}, buy=${buyTrades}, sell=${sellTrades}`, inline: false },
+                    { name: "Max Drawdown", value: `${Number(maxDrawdown).toFixed(2)}%`, inline: false },
+                ],
+                footerText: `Requested by: Polymarket Backtest (Auto)`,
+                timestamp: new Date().toISOString(),
+            },
+        });
+
         return {
-            ok: false,
-            error: payload.error || "Backtest API failed",
+            ok: true,
+            marketId: candidate.marketId,
+            clobTokenId: candidate.clobTokenId,
+            group: candidate.groupName,
+            market: candidate.question,
+            netPnL,
+            returnPct,
+            tradesExecuted,
+            discordSent,
         };
+    } catch (err: any) {
+        return { ok: false, error: err?.message || String(err) };
     }
-
-    const result = payload.result;
-    const netPnL = Number(result.netPnL || 0);
-    const returnPct = Number(result.returnPct || 0);
-    const tradesExecuted = Number(result.tradesExecuted || 0);
-    const buyTrades = Number(result.buyTrades || 0);
-    const sellTrades = Number(result.sellTrades || 0);
-
-    const discordSent = await sendDiscordMessage({
-        title: "Polymarket backtest completed",
-        lines: [
-            `Theme: ${candidate.groupName}`,
-            `Market: ${candidate.question}`,
-            `Net PnL: ${netPnL >= 0 ? "+" : ""}${netPnL.toFixed(2)}`,
-            `Return: ${returnPct.toFixed(2)}%`,
-            `Trades: total=${tradesExecuted}, buy=${buyTrades}, sell=${sellTrades}`,
-            `Detail: ${origin}/polymarket/market/${encodeURIComponent(candidate.clobTokenId)}`,
-        ],
-        mention: false,
-    });
-
-    return {
-        ok: true,
-        marketId: candidate.marketId,
-        clobTokenId: candidate.clobTokenId,
-        group: candidate.groupName,
-        market: candidate.question,
-        netPnL,
-        returnPct,
-        tradesExecuted,
-        discordSent,
-    };
 }
 
-async function runDailyBatch(origin: string, batchSize: number) {
-    const candidates = await getCandidateMarkets(batchSize);
+async function runDailyBatch(
+    origin: string,
+    batchSize: number,
+    excludedClobTokenIds: string[] = [],
+    groupFilters: string[] = [...PRIORITY_GROUP_SLUGS],
+) {
+    const plan = await getDailyBatchPlan(batchSize, excludedClobTokenIds, groupFilters);
+    const candidates = plan.candidates;
     const completed: BacktestRunSuccess[] = [];
     const failed: Array<{ marketId: string; clobTokenId: string; group: string; market: string; error: string }> = [];
 
-    for (const candidate of candidates) {
-        const result = await runBacktestForCandidate(origin, candidate);
-        if (result.ok === true) {
-            completed.push(result);
-        } else {
-            failed.push({
-                marketId: candidate.marketId,
-                clobTokenId: candidate.clobTokenId,
-                group: candidate.groupName,
-                market: candidate.question,
-                error: result.error,
-            });
-        }
+    // Run backtests with limited concurrency to speed up total time while
+    // avoiding overwhelming external services. Five markets can run together.
+    const CONCURRENCY = Math.min(5, Math.max(1, candidates.length));
+
+    for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+        const chunk = candidates.slice(i, i + CONCURRENCY);
+        const promises = chunk.map(async (candidate) => {
+            const result = await runBacktestForCandidate(origin, candidate);
+            if (result.ok === true) {
+                completed.push(result);
+            } else {
+                failed.push({
+                    marketId: candidate.marketId,
+                    clobTokenId: candidate.clobTokenId,
+                    group: candidate.groupName,
+                    market: candidate.question,
+                    error: result.error,
+                });
+            }
+        });
+
+        // Wait for this batch to finish before starting the next.
+        await Promise.all(promises);
     }
 
     const discordDelivered = completed.filter((item) => item.discordSent).length;
 
     await sendDiscordMessage({
-        title: "Polymarket daily backtest batch summary",
+        title: "Polymarket daily automated backtest recommendation",
         lines: [
+            `Run type: daily automated`,
             `Requested batch size: ${batchSize}`,
             `Selected markets: ${candidates.length}`,
+            `Themes: ${groupFilters.join(", ")}`,
             `Completed backtests: ${completed.length}`,
             `Discord notifications delivered: ${discordDelivered}`,
             `Failed backtests: ${failed.length}`,
-            `Theme priority: NBA, Elon Tweets, Economic Policy, Movies`,
+            `Recommendation note: this batch was auto-picked from the daily priority pool.`,
         ],
         mention: false,
     });
@@ -315,6 +437,16 @@ async function runDailyBatch(origin: string, batchSize: number) {
     return {
         batchSize,
         selectedMarkets: candidates.length,
+        excludedCount: plan.excludedCount,
+        plannedMarkets: candidates.map((candidate) => ({
+            marketId: candidate.marketId,
+            clobTokenId: candidate.clobTokenId,
+            group: candidate.groupName,
+            market: candidate.question,
+            isClosed: candidate.isClosed,
+            volume: candidate.volume,
+            liquidity: candidate.liquidity,
+        })),
         completedCount: completed.length,
         failedCount: failed.length,
         discordDelivered,
@@ -369,18 +501,65 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        const body = (await req.json().catch(() => ({}))) as { limit?: number };
+        const body = (await req.json().catch(() => ({}))) as {
+            limit?: number;
+            previewOnly?: boolean;
+            excludedClobTokenIds?: unknown;
+            groupFilters?: unknown;
+        };
         const batchSize = normalizeBatchSize(body.limit);
-        const result = await runDailyBatch(req.nextUrl.origin, batchSize);
+        const excludedClobTokenIds = parseExcludedTokenIds(body.excludedClobTokenIds);
+        const groupFilters = parseGroupFilters(body.groupFilters);
+
+        if (body.previewOnly === true) {
+            const plan = await getDailyBatchPreview(batchSize, excludedClobTokenIds, groupFilters);
+            return NextResponse.json({
+                success: true,
+                source: "preview",
+                requestedBy: user.name || user.email || `User ${user.id}`,
+                batchSize,
+                excludedCount: plan.excludedCount,
+                groupFilters,
+                plannedMarkets: plan.candidates.map((candidate) => ({
+                    marketId: candidate.marketId,
+                    clobTokenId: candidate.clobTokenId,
+                    group: candidate.groupName,
+                    market: candidate.question,
+                    isClosed: candidate.isClosed,
+                    volume: candidate.volume,
+                    liquidity: candidate.liquidity,
+                })),
+            });
+        }
+
+        const result = await runDailyBatch(req.nextUrl.origin, batchSize, excludedClobTokenIds, groupFilters);
 
         return NextResponse.json({
             success: true,
             source: "manual",
             requestedBy: user.name || user.email || `User ${user.id}`,
+            groupFilters,
             ...result,
         });
     } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to run manual polymarket backtests";
         return NextResponse.json({ error: message }, { status: 500 });
     }
+}
+
+function parseGroupFilters(raw: unknown) {
+    const allowed = new Set<string>(PRIORITY_GROUP_SLUGS);
+    if (!Array.isArray(raw)) {
+        return [...PRIORITY_GROUP_SLUGS] as string[];
+    }
+
+    const normalized = Array.from(
+        new Set(
+            raw
+                .map((value) => String(value || "").trim())
+                .filter((value) => allowed.has(value)),
+        ),
+    );
+
+    return normalized.length > 0 ? normalized : ([...PRIORITY_GROUP_SLUGS] as string[]);
 }
