@@ -310,7 +310,8 @@ async function runBacktestForCandidate(origin: string, candidate: CandidateMarke
     const window = getDateWindow(45);
 
     try {
-        const payload = await runBacktest({
+        // Add 60-second timeout to prevent hanging on any single backtest
+        const backTestPromise = runBacktest({
             marketId: candidate.clobTokenId,
             action: "BOTH",
             triggerType: "PRICE_TARGET",
@@ -324,6 +325,12 @@ async function runBacktestForCandidate(origin: string, candidate: CandidateMarke
             initialPosition: 0,
             mode: "repeat",
         } as any);
+
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Backtest execution timeout (60s)")), 60000)
+        );
+
+        const payload = await Promise.race([backTestPromise, timeoutPromise]);
 
         if (!payload || !(payload as any).ok) {
             return { ok: false, error: (payload as any)?.error || "Backtest failed" };
@@ -340,30 +347,8 @@ async function runBacktestForCandidate(origin: string, candidate: CandidateMarke
         const vsBuyAndHold = Number((result?.vsBuyAndHoldPct ?? 0) as number);
         const maxDrawdown = Number((result?.maxDrawdownPct ?? 0) as number);
 
-        const discordSent = await sendDiscordMessage({
-            title: "Polymarket Backtest Completed (Auto)",
-            lines: [],
-            mention: false,
-            embed: {
-                title: `Polymarket Backtest Completed (Auto)`,
-                url: `${origin}/polymarket/market/${encodeURIComponent(candidate.clobTokenId)}`,
-                description: `This is a daily automated recommendation.`,
-                color: 3066993,
-                fields: [
-                    { name: "Generated", value: new Date().toISOString(), inline: false },
-                    { name: "Market", value: candidate.question, inline: false },
-                    { name: "Window", value: `${window.start} to ${window.end}`, inline: false },
-                    { name: "Setup", value: `BOTH | PRICE_TARGET | mode=repeat`, inline: false },
-                    { name: "Net PnL", value: `${netPnL >= 0 ? "+" : ""}${netPnL.toFixed(2)} (${returnPct.toFixed(2)}%)`, inline: true },
-                    { name: "Final Equity", value: `${Number(finalEquity).toFixed(2)}`, inline: true },
-                    { name: "Vs Buy & Hold", value: `${Number(vsBuyAndHold).toFixed(2)} pp`, inline: true },
-                    { name: "Trades", value: `executed=${tradesExecuted}, buy=${buyTrades}, sell=${sellTrades}`, inline: false },
-                    { name: "Max Drawdown", value: `${Number(maxDrawdown).toFixed(2)}%`, inline: false },
-                ],
-                footerText: `Requested by: Polymarket Backtest (Auto)`,
-                timestamp: new Date().toISOString(),
-            },
-        });
+        // Don't send individual Discord messages - save for batch summary instead
+        // This avoids Discord API rate limiting when running many backtests in parallel
 
         return {
             ok: true,
@@ -374,7 +359,7 @@ async function runBacktestForCandidate(origin: string, candidate: CandidateMarke
             netPnL,
             returnPct,
             tradesExecuted,
-            discordSent,
+            discordSent: false, // Changed: will send summary instead
         };
     } catch (err: any) {
         return { ok: false, error: err?.message || String(err) };
@@ -418,9 +403,10 @@ async function runDailyBatch(
         // Timeout or error during pre-loading is non-critical
     });
 
-    // Run backtests with higher concurrency now that price data is cached
-    // Can safely increase to 10 since the main bottleneck (API calls) is pre-loaded
-    const CONCURRENCY = Math.min(10, Math.max(1, candidates.length));
+    // Run backtests with controlled concurrency
+    // Price data is now cached, so we can safely use higher concurrency
+    // But keep it reasonable to avoid overwhelming resources
+    const CONCURRENCY = Math.min(8, Math.max(1, candidates.length));
 
     for (let i = 0; i < candidates.length; i += CONCURRENCY) {
         const chunk = candidates.slice(i, i + CONCURRENCY);
@@ -445,19 +431,42 @@ async function runDailyBatch(
 
     const discordDelivered = completed.filter((item) => item.discordSent).length;
 
+    // Build detailed results for Discord
+    const completedDetails = completed.slice(0, 20).map((item) => ({
+        name: `✅ ${item.market}`,
+        value: `PnL: ${item.netPnL >= 0 ? "+" : ""}${item.netPnL.toFixed(2)} (${item.returnPct.toFixed(2)}%) | Trades: ${item.tradesExecuted}`,
+        inline: false,
+    }));
+
+    const failedDetails = failed.slice(0, 10).map((item) => ({
+        name: `❌ ${item.market}`,
+        value: `Error: ${item.error}`,
+        inline: false,
+    }));
+
+    const summaryFields = [
+        { name: "Run Type", value: "Daily automated batch", inline: true },
+        { name: "Batch Size", value: String(batchSize), inline: true },
+        { name: "Markets Selected", value: String(candidates.length), inline: true },
+        { name: "✅ Completed", value: String(completed.length), inline: true },
+        { name: "❌ Failed", value: String(failed.length), inline: true },
+        { name: "Themes", value: groupFilters.join(", "), inline: false },
+        ...completedDetails,
+        ...failedDetails,
+    ];
+
     await sendDiscordMessage({
-        title: "Polymarket daily automated backtest recommendation",
-        lines: [
-            `Run type: daily automated`,
-            `Requested batch size: ${batchSize}`,
-            `Selected markets: ${candidates.length}`,
-            `Themes: ${groupFilters.join(", ")}`,
-            `Completed backtests: ${completed.length}`,
-            `Discord notifications delivered: ${discordDelivered}`,
-            `Failed backtests: ${failed.length}`,
-            `Recommendation note: this batch was auto-picked from the daily priority pool.`,
-        ],
+        title: "Polymarket Daily Backtest Batch Complete",
+        lines: [],
         mention: false,
+        embed: {
+            title: "Polymarket Daily Backtest Batch Complete",
+            description: `Batch completed: ${completed.length} successful, ${failed.length} failed`,
+            color: completed.length > 0 ? 3066993 : 15158332,
+            fields: summaryFields,
+            footerText: `Generated at ${new Date().toISOString()}`,
+            timestamp: new Date().toISOString(),
+        },
     });
 
     return {
