@@ -395,18 +395,27 @@ async function runDailyBatch(
     // OPTIMIZATION: Pre-load price history for all candidates in parallel
     // This populates the cache in backtest-runner, making subsequent backtest runs much faster
     const priceLoadPromises = candidates.map((candidate) =>
-        fetch(`https://clob.polymarket.com/prices-history?market=${encodeURIComponent(candidate.clobTokenId)}&interval=all`, {
-            next: { revalidate: 300 },
-            headers: { Accept: "application/json" },
-        }).catch(() => null)
+        (async () => {
+            try {
+                const response = await fetch(`https://clob.polymarket.com/prices-history?market=${encodeURIComponent(candidate.clobTokenId)}&interval=all`, {
+                    headers: { Accept: "application/json" },
+                });
+                if (response.ok) {
+                    // Consume the response body to ensure the fetch completes
+                    await response.json().catch(() => null);
+                }
+            } catch {
+                // Non-critical; backtest will still work
+            }
+        })()
     );
 
-    // Wait for all price data to be fetched (with timeout to avoid blocking)
+    // Wait for all price loads with a timeout (don't block forever)
     await Promise.race([
         Promise.all(priceLoadPromises),
-        new Promise((resolve) => setTimeout(resolve, 15000)), // 15 second timeout
+        new Promise((resolve) => setTimeout(resolve, 20000)), // 20 second timeout
     ]).catch(() => {
-        // Errors during pre-loading are non-critical; backtests will still work
+        // Timeout or error during pre-loading is non-critical
     });
 
     // Run backtests with higher concurrency now that price data is cached

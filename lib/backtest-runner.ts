@@ -163,8 +163,6 @@ async function fetchHistoryForMarketId(marketId: string): Promise<PricePoint[]> 
     }
 
     const response = await fetch(`${CLOB_API}/prices-history?market=${encodeURIComponent(marketId)}&interval=all`, {
-        // Use default cache behavior (revalidate after period) instead of no-store
-        next: { revalidate: 300 }, // Revalidate every 5 minutes
         headers: { Accept: "application/json" },
     });
 
@@ -193,7 +191,6 @@ async function resolveFromDirectMarketLookup(inputId: string): Promise<string[]>
 
     try {
         const response = await fetch(`${GAMMA_API}/markets/${encodeURIComponent(target)}`, {
-            next: { revalidate: 300 }, // Cache for 5 minutes
             headers: { Accept: "application/json" },
         });
         if (!response.ok) return [];
@@ -233,7 +230,6 @@ async function resolveClobTokenIds(inputId: string): Promise<string[]> {
         for (let offset = 0; offset <= 5000; offset += 500) {
             try {
                 const response = await fetch(`${GAMMA_API}/events?limit=500&offset=${offset}&closed=${closed}`, {
-                    next: { revalidate: 600 }, // Cache for 10 minutes
                     headers: { Accept: "application/json" },
                 });
                 if (!response.ok) break;
