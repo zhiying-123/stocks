@@ -586,36 +586,31 @@ export async function POST(req: NextRequest) {
             // Sort by PnL desc so the best ones show first
             const sortedCompleted = [...completed].sort((a, b) => b.netPnL - a.netPnL);
 
-            // Chunk by 10 embeds per message (Discord limit)
+            // Chunk markets to avoid hitting the 4096 character limit of Embed Description
+            // This satisfies the requirement of having them grouped "as one big piece" separated by lines.
             for (let i = 0; i < sortedCompleted.length; i += 10) {
                 const chunk = sortedCompleted.slice(i, i + 10);
-                const embeds = chunk.map((item) => {
+                
+                const descriptionLines = chunk.map(item => {
                     const marketUrl = `${req.nextUrl.origin}/polymarket/market/${encodeURIComponent(item.clobTokenId)}`;
-                    return {
-                        title: `Polymarket Backtest Completed (Auto)`,
-                        url: marketUrl,
-                        color: 3066993, // Green color as requested
-                        description: [
-                            `Generated: ${new Date().toISOString().replace('T', ' ').substring(0, 19)}`,
-                            `Market: **${item.market}**`,
-                            `Window: ${item.windowStart} to ${item.windowEnd}`,
-                            `Setup: BOTH | PRICE_TARGET | mode=repeat`,
-                            ``,
-                            `[Open Detail Page](${marketUrl})`
-                        ].join('\n'),
-                        fields: [
-                            { name: "Net PnL", value: `${item.netPnL >= 0 ? "+" : ""}${item.netPnL.toFixed(2)} (${item.returnPct.toFixed(2)}%)`, inline: true },
-                            { name: "Final Equity", value: `${Number(item.finalEquity).toFixed(2)}`, inline: true },
-                            { name: "Vs Buy & Hold", value: `${Number(item.vsBuyAndHold).toFixed(2)} pp`, inline: true },
-                            { name: "Trades", value: `executed=${item.tradesExecuted}, buy=${item.buyTrades}, sell=${item.sellTrades}`, inline: false },
-                            { name: "Max Drawdown", value: `${Number(item.maxDrawdown).toFixed(2)}%`, inline: false },
-                        ],
-                        footer: { text: `Requested by: ${requestedBy} • ${new Date().toISOString().replace('T', ' ').substring(0, 10).replace(/-/g, '/')}` },
-                    };
-                });
+                    return [
+                        `**[${item.market}](${marketUrl})**`,
+                        `**Net PnL:** \`${item.netPnL >= 0 ? "+" : ""}${item.netPnL.toFixed(2)} (${item.returnPct.toFixed(2)}%)\` | **Equity:** \`${Number(item.finalEquity).toFixed(2)}\``,
+                        `**Vs B&H:** \`${Number(item.vsBuyAndHold).toFixed(2)} pp\` | **Max DD:** \`${Number(item.maxDrawdown).toFixed(2)}%\``,
+                        `**Trades:** \`${item.tradesExecuted} (buy=${item.buyTrades}, sell=${item.sellTrades})\``,
+                        `*[👉 Open Detail Page](${marketUrl})*`
+                    ].join('\n');
+                }).join('\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n');
+
+                const embed = {
+                    title: i === 0 ? "🏆 Polymarket Auto-Backtest Report" : "🏆 Polymarket Auto-Backtest Report (Cont.)",
+                    color: 3066993, // Green color as requested
+                    description: descriptionLines,
+                    footer: { text: `Requested by: ${requestedBy} • ${new Date().toISOString().replace('T', ' ').substring(0, 10).replace(/-/g, '/')}` }
+                };
 
                 try {
-                    await sendDiscordPayload({ content: "", embeds });
+                    await sendDiscordPayload({ content: "", embeds: [embed] });
                     delivered += chunk.length;
                 } catch {
                     // ignore individual chunk failures
