@@ -34,7 +34,7 @@ type DiscordWebhookPayload = {
     }>;
 };
 
-async function sendDiscordPayload(payload: DiscordWebhookPayload) {
+export async function sendDiscordPayload(payload: DiscordWebhookPayload) {
     const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
     if (!webhookUrl) {
         return false;

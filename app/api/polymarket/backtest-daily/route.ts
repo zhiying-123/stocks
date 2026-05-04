@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { sendDiscordMessage } from "@/lib/discord";
+import { sendDiscordMessage, sendDiscordPayload } from "@/lib/discord";
 import runBacktest from "@/lib/backtest-runner";
 import { ensureDefaultPolymarketGroups, syncPolymarketGroups } from "@/lib/polymarket-groups";
 
@@ -45,6 +45,13 @@ type BacktestRunSuccess = {
     returnPct: number;
     tradesExecuted: number;
     discordSent: boolean;
+    buyTrades: number;
+    sellTrades: number;
+    finalEquity: number;
+    maxDrawdown: number;
+    vsBuyAndHold: number;
+    windowStart: string;
+    windowEnd: string;
 };
 
 type BacktestRunFailure = {
@@ -361,6 +368,13 @@ async function runBacktestForCandidate(origin: string, candidate: CandidateMarke
             netPnL,
             returnPct,
             tradesExecuted,
+            buyTrades,
+            sellTrades,
+            finalEquity,
+            maxDrawdown,
+            vsBuyAndHold,
+            windowStart: window.start,
+            windowEnd: window.end,
             discordSent: false, // Changed: will send summary instead
         };
     } catch (err: any) {
@@ -565,46 +579,50 @@ export async function POST(req: NextRequest) {
 
         // 2. Final summary block from Frontend
         if (body.sendSummary) {
-            const { completed, failed, batchSize, candidatesLength, groupFilters } = body.sendSummary;
+            const { completed } = body.sendSummary;
+            const requestedBy = user.name || user.email || `User ${user.id}`;
+            let delivered = 0;
 
-            const completedDetails = completed.slice(0, 20).map((item) => ({
-                name: `✅ ${item.market}`,
-                value: `PnL: ${item.netPnL >= 0 ? "+" : ""}${item.netPnL.toFixed(2)} (${item.returnPct.toFixed(2)}%) | Trades: ${item.tradesExecuted}`,
-                inline: false,
-            }));
+            // Sort by PnL desc so the best ones show first
+            const sortedCompleted = [...completed].sort((a, b) => b.netPnL - a.netPnL);
 
-            const failedDetails = failed.slice(0, 10).map((item) => ({
-                name: `❌ ${item.market}`,
-                value: `Error: ${item.error}`,
-                inline: false,
-            }));
+            // Chunk by 10 embeds per message (Discord limit)
+            for (let i = 0; i < sortedCompleted.length; i += 10) {
+                const chunk = sortedCompleted.slice(i, i + 10);
+                const embeds = chunk.map((item) => {
+                    const marketUrl = `${req.nextUrl.origin}/polymarket/market/${encodeURIComponent(item.clobTokenId)}`;
+                    return {
+                        title: `Polymarket Backtest Completed (Auto)`,
+                        url: marketUrl,
+                        color: 3066993, // Green color as requested
+                        description: [
+                            `Generated: ${new Date().toISOString().replace('T', ' ').substring(0, 19)}`,
+                            `Market: **${item.market}**`,
+                            `Window: ${item.windowStart} to ${item.windowEnd}`,
+                            `Setup: BOTH | PRICE_TARGET | mode=repeat`,
+                            ``,
+                            `[Open Detail Page](${marketUrl})`
+                        ].join('\n'),
+                        fields: [
+                            { name: "Net PnL", value: `${item.netPnL >= 0 ? "+" : ""}${item.netPnL.toFixed(2)} (${item.returnPct.toFixed(2)}%)`, inline: true },
+                            { name: "Final Equity", value: `${Number(item.finalEquity).toFixed(2)}`, inline: true },
+                            { name: "Vs Buy & Hold", value: `${Number(item.vsBuyAndHold).toFixed(2)} pp`, inline: true },
+                            { name: "Trades", value: `executed=${item.tradesExecuted}, buy=${item.buyTrades}, sell=${item.sellTrades}`, inline: false },
+                            { name: "Max Drawdown", value: `${Number(item.maxDrawdown).toFixed(2)}%`, inline: false },
+                        ],
+                        footer: { text: `Requested by: ${requestedBy} • ${new Date().toISOString().replace('T', ' ').substring(0, 10).replace(/-/g, '/')}` },
+                    };
+                });
 
-            const summaryFields = [
-                { name: "Run Type", value: "Daily batch (Manual UI trigger)", inline: true },
-                { name: "Batch Size", value: String(batchSize), inline: true },
-                { name: "Markets Selected", value: String(candidatesLength), inline: true },
-                { name: "✅ Completed", value: String(completed.length), inline: true },
-                { name: "❌ Failed", value: String(failed.length), inline: true },
-                { name: "Themes", value: groupFilters.join(", "), inline: false },
-                ...completedDetails,
-                ...failedDetails,
-            ];
+                try {
+                    await sendDiscordPayload({ content: "", embeds });
+                    delivered += chunk.length;
+                } catch {
+                    // ignore individual chunk failures
+                }
+            }
 
-            await sendDiscordMessage({
-                title: "Polymarket Daily Backtest Batch Complete",
-                lines: [],
-                mention: false,
-                embed: {
-                    title: "Polymarket Daily Backtest Batch Complete",
-                    description: `Batch completed: ${completed.length} successful, ${failed.length} failed`,
-                    color: completed.length > 0 ? 3066993 : 15158332,
-                    fields: summaryFields,
-                    footerText: `Requested by ${user.name || user.email || `User ${user.id}`}`,
-                    timestamp: new Date().toISOString(),
-                },
-            });
-
-            return NextResponse.json({ success: true, discordDelivered: completed.length });
+            return NextResponse.json({ success: true, discordDelivered: delivered });
         }
 
         if (body.previewOnly === true) {
