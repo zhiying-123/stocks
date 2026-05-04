@@ -590,7 +590,7 @@ export async function POST(req: NextRequest) {
             // This satisfies the requirement of having them grouped "as one big piece" separated by lines.
             for (let i = 0; i < sortedCompleted.length; i += 10) {
                 const chunk = sortedCompleted.slice(i, i + 10);
-                
+
                 const descriptionLines = chunk.map(item => {
                     const marketUrl = `${req.nextUrl.origin}/polymarket/market/${encodeURIComponent(item.clobTokenId)}`;
                     return [
