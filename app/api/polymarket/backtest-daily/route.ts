@@ -392,9 +392,26 @@ async function runDailyBatch(
     const completed: BacktestRunSuccess[] = [];
     const failed: Array<{ marketId: string; clobTokenId: string; group: string; market: string; error: string }> = [];
 
-    // Run backtests with limited concurrency to speed up total time while
-    // avoiding overwhelming external services. Five markets can run together.
-    const CONCURRENCY = Math.min(5, Math.max(1, candidates.length));
+    // OPTIMIZATION: Pre-load price history for all candidates in parallel
+    // This populates the cache in backtest-runner, making subsequent backtest runs much faster
+    const priceLoadPromises = candidates.map((candidate) =>
+        fetch(`https://clob.polymarket.com/prices-history?market=${encodeURIComponent(candidate.clobTokenId)}&interval=all`, {
+            next: { revalidate: 300 },
+            headers: { Accept: "application/json" },
+        }).catch(() => null)
+    );
+
+    // Wait for all price data to be fetched (with timeout to avoid blocking)
+    await Promise.race([
+        Promise.all(priceLoadPromises),
+        new Promise((resolve) => setTimeout(resolve, 15000)), // 15 second timeout
+    ]).catch(() => {
+        // Errors during pre-loading are non-critical; backtests will still work
+    });
+
+    // Run backtests with higher concurrency now that price data is cached
+    // Can safely increase to 10 since the main bottleneck (API calls) is pre-loaded
+    const CONCURRENCY = Math.min(10, Math.max(1, candidates.length));
 
     for (let i = 0; i < candidates.length; i += CONCURRENCY) {
         const chunk = candidates.slice(i, i + CONCURRENCY);

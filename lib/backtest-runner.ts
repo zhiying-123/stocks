@@ -27,6 +27,39 @@ type PricePoint = { timestamp: number; price: number };
 const CLOB_API = "https://clob.polymarket.com";
 const GAMMA_API = "https://gamma-api.polymarket.com";
 
+// LRU cache for price history to avoid redundant API calls
+// Stores up to 100 markets' price histories in memory
+interface CacheEntry {
+    points: PricePoint[];
+    resolvedMarketId: string;
+    timestamp: number;
+}
+
+const PRICE_HISTORY_CACHE = new Map<string, CacheEntry>();
+const CACHE_MAX_SIZE = 100;
+const CACHE_TTL_MINUTES = 60; // Refresh cache every 60 minutes
+
+function getCachedPriceHistory(marketId: string): CacheEntry | null {
+    const entry = PRICE_HISTORY_CACHE.get(marketId);
+    if (!entry) return null;
+
+    const ageMinutes = (Date.now() - entry.timestamp) / (1000 * 60);
+    if (ageMinutes > CACHE_TTL_MINUTES) {
+        PRICE_HISTORY_CACHE.delete(marketId);
+        return null;
+    }
+    return entry;
+}
+
+function setCachedPriceHistory(marketId: string, data: CacheEntry) {
+    // Simple LRU: if cache is full, remove oldest entry
+    if (PRICE_HISTORY_CACHE.size >= CACHE_MAX_SIZE) {
+        const firstKey = PRICE_HISTORY_CACHE.keys().next().value;
+        if (firstKey) PRICE_HISTORY_CACHE.delete(firstKey);
+    }
+    PRICE_HISTORY_CACHE.set(marketId, data);
+}
+
 function parseStringArray(value: unknown): string[] {
     if (!value) return [];
     if (Array.isArray(value)) return value.map((item) => String(item));
@@ -123,8 +156,15 @@ function normalizePriceHistory(raw: unknown): PricePoint[] {
 }
 
 async function fetchHistoryForMarketId(marketId: string): Promise<PricePoint[]> {
+    // Check cache first
+    const cached = getCachedPriceHistory(marketId);
+    if (cached) {
+        return cached.points;
+    }
+
     const response = await fetch(`${CLOB_API}/prices-history?market=${encodeURIComponent(marketId)}&interval=all`, {
-        cache: "no-store",
+        // Use default cache behavior (revalidate after period) instead of no-store
+        next: { revalidate: 300 }, // Revalidate every 5 minutes
         headers: { Accept: "application/json" },
     });
 
@@ -133,7 +173,18 @@ async function fetchHistoryForMarketId(marketId: string): Promise<PricePoint[]> 
     }
 
     const raw = (await response.json()) as unknown;
-    return normalizePriceHistory(raw);
+    const points = normalizePriceHistory(raw);
+
+    // Cache the result
+    if (points.length > 0) {
+        setCachedPriceHistory(marketId, {
+            points,
+            resolvedMarketId: marketId,
+            timestamp: Date.now(),
+        });
+    }
+
+    return points;
 }
 
 async function resolveFromDirectMarketLookup(inputId: string): Promise<string[]> {
@@ -142,7 +193,7 @@ async function resolveFromDirectMarketLookup(inputId: string): Promise<string[]>
 
     try {
         const response = await fetch(`${GAMMA_API}/markets/${encodeURIComponent(target)}`, {
-            cache: "no-store",
+            next: { revalidate: 300 }, // Cache for 5 minutes
             headers: { Accept: "application/json" },
         });
         if (!response.ok) return [];
@@ -165,6 +216,16 @@ async function resolveClobTokenIds(inputId: string): Promise<string[]> {
     const target = normalizeIdentifier(inputId);
     if (!target) return [];
 
+    // Quick heuristic: if it looks like a CLOB token ID (32+ hex chars or UUID-like format),
+    // skip expensive API search and return it directly.
+    // This optimization helps when the caller already has a valid token ID.
+    if (
+        target.match(/^[a-fA-F0-9]{32,}$/) ||  // Hex string 32+ chars
+        target.match(/^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-/) // UUID format
+    ) {
+        return [target];
+    }
+
     const directResolved = await resolveFromDirectMarketLookup(target);
     if (directResolved.length > 0) return directResolved;
 
@@ -172,7 +233,7 @@ async function resolveClobTokenIds(inputId: string): Promise<string[]> {
         for (let offset = 0; offset <= 5000; offset += 500) {
             try {
                 const response = await fetch(`${GAMMA_API}/events?limit=500&offset=${offset}&closed=${closed}`, {
-                    cache: "no-store",
+                    next: { revalidate: 600 }, // Cache for 10 minutes
                     headers: { Accept: "application/json" },
                 });
                 if (!response.ok) break;
@@ -201,6 +262,12 @@ async function resolveClobTokenIds(inputId: string): Promise<string[]> {
 }
 
 async function fetchPolymarketHistory(marketId: string): Promise<{ points: PricePoint[]; resolvedMarketId: string }> {
+    // Check cache first with the input marketId (fast path for already-resolved token IDs)
+    const cached = getCachedPriceHistory(marketId);
+    if (cached) {
+        return cached;
+    }
+
     const candidateIds = new Set<string>();
     const rawCandidates = (() => {
         const normalized = normalizeIdentifier(marketId);
@@ -222,7 +289,15 @@ async function fetchPolymarketHistory(marketId: string): Promise<{ points: Price
     for (const candidate of candidateIds) {
         if (!candidate) continue;
         const points = await fetchHistoryForMarketId(candidate);
-        if (points.length > 0) return { points, resolvedMarketId: candidate };
+        if (points.length > 0) {
+            const result = { points, resolvedMarketId: candidate };
+            // Cache the result
+            setCachedPriceHistory(marketId, {
+                ...result,
+                timestamp: Date.now(),
+            });
+            return result;
+        }
     }
 
     const tried = Array.from(candidateIds).slice(0, 8).join(", ");

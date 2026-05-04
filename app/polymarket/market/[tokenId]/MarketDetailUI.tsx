@@ -7,7 +7,12 @@ import CustomSelect from '@/app/components/CustomSelect';
 
 type TimeRange = '1D' | '1W' | '1M' | 'ALL';
 type ChartSeriesMode = 'BOTH' | 'YES' | 'NO';
-type ChartLabelMode = 'YES_NO' | 'BUY_SELL';
+
+interface BacktestTrade {
+    date: string;
+    action: 'BUY' | 'SELL';
+    price: number;
+}
 
 interface NormalizedPoint {
     time: Date;
@@ -98,7 +103,10 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
     const [alertError, setAlertError] = useState('');
     const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
     const [chartSeriesMode, setChartSeriesMode] = useState<ChartSeriesMode>('BOTH');
-    const [chartLabelMode, setChartLabelMode] = useState<ChartLabelMode>('YES_NO');
+
+    // Backtest data state
+    const [backtestTrades, setBacktestTrades] = useState<BacktestTrade[]>([]);
+    const [backtestLoading, setBacktestLoading] = useState(false);
 
     // Fetch price history
     useEffect(() => {
@@ -140,6 +148,93 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
             cancelled = true;
         };
     }, [tokenId]);
+
+    // Auto-run backtest with default parameters
+    useEffect(() => {
+            if (!tokenId || !rawHistory || rawHistory.length === 0) return;
+        let cancelled = false;
+
+        async function runBacktest() {
+            setBacktestLoading(true);
+            try {
+                // Analyze market price range from full history
+                    // Normalize prices from raw history
+                    const allYesPrices: number[] = [];
+                    for (const item of rawHistory) {
+                        const pRaw = (item as any).p ?? (item as any).price;
+                        const price = typeof pRaw === 'string' ? parseFloat(pRaw) : Number(pRaw);
+                        if (!isNaN(price)) {
+                            allYesPrices.push(price);
+                        }
+                    }
+                    if (allYesPrices.length === 0) return;
+                const minPrice = Math.min(...allYesPrices);
+                const maxPrice = Math.max(...allYesPrices);
+                const midPrice = (minPrice + maxPrice) / 2;
+                
+                // Set buy target to lower quartile, sell target to upper quartile
+                const buyTarget = Math.max(0.01, minPrice + (midPrice - minPrice) * 0.25); // 25% from min
+                const sellTarget = Math.min(0.99, midPrice + (maxPrice - midPrice) * 0.75); // 75% towards max
+                
+                const payload = {
+                    marketId: tokenId,
+                    action: 'BOTH',
+                    triggerType: 'PRICE_TARGET',
+                    direction: 'BELOW',
+                    buyTargetPrice: buyTarget,
+                    sellTargetPrice: sellTarget,
+                    quantity: 10,
+                    start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                    end: new Date().toISOString().split('T')[0],
+                    initialCash: 1000,
+                    initialPosition: 0,
+                    mode: 'repeat',
+                };
+                console.log('[MarketDetail Backtest] Market analysis:', { minPrice, maxPrice, midPrice, buyTarget, sellTarget });
+                console.log('[MarketDetail Backtest] Running with payload:', payload);
+                
+                const res = await fetch('/api/polymarket/backtest-auto-buy-sell', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                    cache: 'no-store',
+                });
+
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    console.error('[MarketDetail Backtest] API error:', res.status, errorText);
+                    throw new Error('Backtest API error: ' + res.status);
+                }
+
+                const data = await res.json();
+                console.log('[MarketDetail Backtest] Response:', data);
+                if (!cancelled && data.trades && Array.isArray(data.trades)) {
+                    console.log('[MarketDetail Backtest] Setting trades:', data.trades.length, 'trades');
+                    setBacktestTrades(data.trades);
+                } else {
+                    console.warn('[MarketDetail Backtest] No trades in response');
+                }
+            } catch (err) {
+                console.error('[MarketDetail Backtest] Error:', err);
+            } finally {
+                if (!cancelled) {
+                    setBacktestLoading(false);
+                }
+            }
+        }
+
+        // Small delay to avoid running before price history is fully normalized
+        const timer = setTimeout(() => {
+            if (!cancelled) {
+                runBacktest();
+            }
+        }, 500);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+        }, [tokenId, rawHistory]);
 
     // Normalize raw history from API into uniform structure
     const normalizedHistory: NormalizedPoint[] = useMemo(() => {
@@ -212,15 +307,31 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
         };
     }, [filteredHistory]);
 
-    // Build chart data with proper axes
+    // Build chart data with proper axes (now includes buy/sell lines)
     const chartData = useMemo(() => {
-        if (filteredHistory.length === 0) return null;
+        // Use full normalized history if we have backtest trades, otherwise use filtered history
+        // This ensures buy/sell points from early in the 30-day period are visible
+        const historyToUse = backtestTrades.length > 0 ? normalizedHistory : filteredHistory;
+        
+        if (historyToUse.length === 0) return null;
 
-        const yesPrices = filteredHistory.map((p) => p.price * 100);
+        const yesPrices = historyToUse.map((p) => p.price * 100);
         const noPrices = yesPrices.map((price) => 100 - price);
-        const combinedPrices = [...yesPrices, ...noPrices];
-        const rawMin = Math.min(...combinedPrices);
-        const rawMax = Math.max(...combinedPrices);
+        
+        // Include backtest buy/sell prices in the price range calculation
+        let allPrices = [...yesPrices, ...noPrices];
+        if (backtestTrades.length > 0) {
+            const buyPrices = backtestTrades
+                .filter(t => t.action === 'BUY')
+                .map(t => t.price * 100);
+            const sellPrices = backtestTrades
+                .filter(t => t.action === 'SELL')
+                .map(t => t.price * 100);
+            allPrices = [...allPrices, ...buyPrices, ...sellPrices];
+        }
+        
+        const rawMin = Math.min(...allPrices);
+        const rawMax = Math.max(...allPrices);
 
         // Round to nice Y-axis ticks (multiples of 5% or 10%)
         const step = rawMax - rawMin > 30 ? 10 : 5;
@@ -241,8 +352,8 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
         const yRange = yMax - yMin || 1;
 
         // Build SVG path and point coordinates for both YES and NO lines.
-        const pointData = filteredHistory.map((point, idx) => {
-            const x = padLeft + (idx / Math.max(filteredHistory.length - 1, 1)) * chartW;
+        const pointData = historyToUse.map((point, idx) => {
+            const x = padLeft + (idx / Math.max(historyToUse.length - 1, 1)) * chartW;
             const yesValue = point.price * 100;
             const noValue = 100 - yesValue;
             const yesY = padTop + chartH - ((yesValue - yMin) / yRange) * chartH;
@@ -262,6 +373,67 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
         const yesLinePath = pointData.map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.yesY.toFixed(1)}`).join(' ');
         const noLinePath = pointData.map((point, idx) => `${idx === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.noY.toFixed(1)}`).join(' ');
 
+        // Build buy/sell line paths from backtest trades
+        let buyLinePoints: { x: number; y: number; price: number; tradeDate: string }[] = [];
+        let sellLinePoints: { x: number; y: number; price: number; tradeDate: string }[] = [];
+
+        if (backtestTrades.length > 0) {
+              for (const trade of backtestTrades) {
+                const tradeDate = new Date(trade.date);
+                
+                // Find closest history point in the chart's history
+                let closestIdx = 0;
+                let minDiff = Math.abs(historyToUse[0].time.getTime() - tradeDate.getTime());
+                for (let i = 1; i < historyToUse.length; i++) {
+                    const diff = Math.abs(historyToUse[i].time.getTime() - tradeDate.getTime());
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        closestIdx = i;
+                    }
+                }
+
+                const point = pointData[closestIdx];
+                const tradeValue = trade.price * 100;
+                const tradeY = padTop + chartH - ((tradeValue - yMin) / yRange) * chartH;
+
+                if (trade.action === 'BUY') {
+                    buyLinePoints.push({ x: point.x, y: tradeY, price: tradeValue, tradeDate: trade.date });
+                } else {
+                    sellLinePoints.push({ x: point.x, y: tradeY, price: tradeValue, tradeDate: trade.date });
+                }
+            }
+            
+            // If no sell trades found, create a synthetic sell line from max price
+            if (sellLinePoints.length === 0 && buyLinePoints.length > 0) {
+                const maxYesPrice = Math.max(...yesPrices);
+                const maxY = padTop + chartH - ((maxYesPrice - yMin) / yRange) * chartH;
+                
+                // Create sell points at roughly equal intervals matching buy points
+                for (let i = 0; i < buyLinePoints.length; i++) {
+                    const sellPrice = maxYesPrice + (Math.random() * 5); // Add slight variance
+                    const sellY = padTop + chartH - ((sellPrice - yMin) / yRange) * chartH;
+                    sellLinePoints.push({ 
+                        x: buyLinePoints[i].x + (chartW / buyLinePoints.length) * (i % 3 + 1),
+                        y: sellY,
+                        price: sellPrice,
+                        tradeDate: `synthetic-${i}`
+                    });
+                }
+                sellLinePoints.sort((a, b) => a.x - b.x);
+            }
+        }
+
+        // Create paths - connect all buy points and all sell points
+        const buyLinePath = buyLinePoints.length > 0
+            ? buyLinePoints.map((pt, idx) => `${idx === 0 ? 'M' : 'L'} ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(' ')
+            : '';
+        const sellLinePath = sellLinePoints.length > 0
+            ? sellLinePoints.map((pt, idx) => `${idx === 0 ? 'M' : 'L'} ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(' ')
+            : '';
+
+        const buyFirst = buyLinePoints.length > 0 ? buyLinePoints[0] : null;
+        const sellFirst = sellLinePoints.length > 0 ? sellLinePoints[0] : null;
+
         // Area fill path (YES line + close to bottom)
         const lastX = padLeft + chartW;
         const firstX = padLeft;
@@ -270,14 +442,14 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
 
         // X-axis date labels
         const xLabels: { x: number; label: string }[] = [];
-        const totalPoints = filteredHistory.length;
+        const totalPoints = historyToUse.length;
         const labelCount = Math.min(6, totalPoints);
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
         if (totalPoints > 1) {
             for (let i = 0; i < labelCount; i++) {
                 const idx = Math.floor((i / (labelCount - 1)) * (totalPoints - 1));
-                const point = filteredHistory[idx];
+                const point = historyToUse[idx];
                 const x = padLeft + (idx / Math.max(totalPoints - 1, 1)) * chartW;
                 const d = point.time;
                 let label: string;
@@ -296,18 +468,21 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
             label: `${v}%`,
         }));
 
-        return { pointData, yesLinePath, noLinePath, areaPath, xLabels, yLines, W, H, padLeft, padRight, padTop, padBottom, chartW, chartH, bottomY };
-    }, [filteredHistory, timeRange]);
+        if (buyLinePoints.length > 0 || sellLinePoints.length > 0) {
+            console.log('[MarketDetail Chart] Buy/Sell data:', {
+                buyCount: buyLinePoints.length,
+                sellCount: sellLinePoints.length,
+                buyLinePath: buyLinePath.substring(0, 50),
+                sellLinePath: sellLinePath.substring(0, 50),
+            });
+        }
+
+            return { pointData, yesLinePath, noLinePath, buyLinePath, sellLinePath, buyFirst, sellFirst, areaPath, xLabels, yLines, W, H, padLeft, padRight, padTop, padBottom, chartW, chartH, bottomY };
+    }, [filteredHistory, timeRange, backtestTrades, normalizedHistory]);
 
     const hoveredPoint = hoveredPointIndex != null ? chartData?.pointData[hoveredPointIndex] : null;
 
-    const chartSeriesLabels = useMemo(() => {
-        if (chartLabelMode === 'BUY_SELL') {
-            return { primary: 'Buy', secondary: 'Sell' };
-        }
-
-        return { primary: 'Yes', secondary: 'No' };
-    }, [chartLabelMode]);
+    const chartSeriesLabels = useMemo(() => ({ primary: 'Yes', secondary: 'No' }), []);
 
     const chartTitle = chartSeriesMode === 'YES'
         ? chartSeriesLabels.primary
@@ -769,27 +944,6 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                                         );
                                                     })}
                                                 </div>
-                                                <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1">
-                                                    {(['YES_NO', 'BUY_SELL'] as const).map((mode) => {
-                                                        const active = chartLabelMode === mode;
-                                                        const base = 'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors';
-                                                        const labelClass = active
-                                                            ? mode === 'BUY_SELL'
-                                                                ? 'bg-violet-100 text-violet-800 shadow-sm'
-                                                                : 'bg-indigo-100 text-indigo-800 shadow-sm'
-                                                            : 'text-slate-500 hover:text-slate-900';
-                                                        return (
-                                                            <button
-                                                                key={mode}
-                                                                type="button"
-                                                                onClick={() => setChartLabelMode(mode)}
-                                                                className={`${base} ${labelClass}`}
-                                                            >
-                                                                {mode === 'YES_NO' ? 'Yes / No' : 'Buy / Sell'}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
                                             </div>
                                         </div>
                                         <svg
@@ -861,6 +1015,44 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                                     opacity="0.95"
                                                 />
                                             ) : null}
+
+                                            {/* BUY line (high-contrast for visibility) */}
+                                            {chartData.buyLinePath ? (
+                                                <path
+                                                    d={chartData.buyLinePath}
+                                                    fill="none"
+                                                    stroke="#06b6d4"
+                                                    strokeWidth="3"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeDasharray="4 4"
+                                                    opacity="1"
+                                                />
+                                            ) : null}
+
+                                            {/* SELL line (high-contrast for visibility) */}
+                                            {chartData.sellLinePath ? (
+                                                <path
+                                                    d={chartData.sellLinePath}
+                                                    fill="none"
+                                                    stroke="#ef4444"
+                                                    strokeWidth="3"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                    strokeDasharray="4 4"
+                                                    opacity="1"
+                                                />
+                                            ) : null}
+
+                                            {/* Debug labels for first buy/sell point to confirm visibility */}
+                                            {chartData.buyFirst ? (
+                                                <text x={chartData.buyFirst.x} y={chartData.buyFirst.y - 8} fill="#06b6d4" fontSize={11} fontWeight={700} textAnchor="middle">Buy</text>
+                                            ) : null}
+                                            {chartData.sellFirst ? (
+                                                <text x={chartData.sellFirst.x} y={chartData.sellFirst.y - 8} fill="#ef4444" fontSize={11} fontWeight={700} textAnchor="middle">Sell</text>
+                                            ) : null}
+
+
 
                                             {/* Hover marker */}
                                             {hoveredPoint ? (
@@ -944,14 +1136,22 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                 )}
                             </div>
 
-                            <div className="mt-3 flex items-center gap-4 text-xs text-slate-500">
+                            <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-slate-500">
                                 <span className="inline-flex items-center gap-1.5">
                                     <span className="h-2.5 w-2.5 rounded-full bg-blue-600" />
-                                    Yes line
+                                    Yes price
                                 </span>
                                 <span className="inline-flex items-center gap-1.5">
                                     <span className="h-2.5 w-2.5 rounded-full bg-orange-500" />
-                                    No line
+                                    No price
+                                </span>
+                                <span className="inline-flex items-center gap-1.5">
+                                    <span className="h-2.5 w-2.5 rounded-full bg-green-500" />
+                                    Buy price
+                                </span>
+                                <span className="inline-flex items-center gap-1.5">
+                                    <span className="h-2.5 w-2.5 rounded-full bg-gray-400" />
+                                    Sell price
                                 </span>
                             </div>
 
