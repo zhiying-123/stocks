@@ -5,6 +5,8 @@ import { sendDiscordMessage } from "@/lib/discord";
 import runBacktest from "@/lib/backtest-runner";
 import { ensureDefaultPolymarketGroups, syncPolymarketGroups } from "@/lib/polymarket-groups";
 
+export const maxDuration = 300; // 5 minutes max duration for Vercel
+
 const PRIORITY_GROUP_SLUGS = ["nba", "elon-tweets", "economic-policy", "movies"] as const;
 const DEFAULT_DAILY_BATCH_SIZE = 12;
 const MIN_DAILY_BATCH_SIZE = 5;
