@@ -144,34 +144,104 @@ export default function AdminBacktestsPage() {
   }
 
   async function runDailyBatch() {
+    if (plannedMarkets.length === 0) {
+      setMessage("No markets planned. Refresh or change filters.");
+      return;
+    }
+
     setLoading(true);
-    setMessage("");
+    setMessage("Starting batch process...");
+
+    // Reset any previous results
+    setResult({
+      batchSize: normalizedLimit,
+      completedCount: 0,
+      failedCount: 0,
+      discordDelivered: 0,
+      completed: [],
+      failed: [],
+    });
+
+    const completed: any[] = [];
+    const failed: any[] = [];
 
     try {
-      const response = await fetch("/api/polymarket/backtest-daily", {
+      // Phase 1: Process planned markets one by one
+      for (let i = 0; i < plannedMarkets.length; i++) {
+        const planned = plannedMarkets[i];
+        setMessage(`Running backtest ${i + 1} of ${plannedMarkets.length}... (${planned.market})`);
+
+        // Re-map planned market back to backend CandidateMarket format
+        const candidate = {
+          marketId: planned.marketId,
+          clobTokenId: planned.clobTokenId,
+          groupName: planned.group,
+          groupSlug: planned.group.toLowerCase().replace(/\s+/g, '-'),
+          question: planned.market,
+          isClosed: planned.isClosed,
+          volume: planned.volume,
+          liquidity: planned.liquidity,
+        };
+
+        const response = await fetch("/api/polymarket/backtest-daily", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ runSingleCandidate: candidate }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success && data.result?.ok) {
+          completed.push(data.result);
+        } else {
+          failed.push({
+            marketId: candidate.marketId,
+            clobTokenId: candidate.clobTokenId,
+            group: candidate.groupName,
+            market: candidate.question,
+            error: data?.result?.error || data?.error || "Unknown server error",
+          });
+        }
+
+        // Update UI as we progress
+        setResult(prev => ({
+          ...prev!,
+          completedCount: completed.length,
+          failedCount: failed.length,
+          completed: [...completed],
+          failed: [...failed],
+        }));
+      }
+
+      // Phase 2: Send Discord Summary
+      setMessage("All backtests completed. Sending Discord summary...");
+      const summaryResponse = await fetch("/api/polymarket/backtest-daily", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          limit: normalizedLimit,
-          excludedClobTokenIds,
-          groupFilters: selectedThemeSlugs,
+          sendSummary: {
+            batchSize: normalizedLimit,
+            candidatesLength: plannedMarkets.length,
+            groupFilters: selectedThemeSlugs,
+            completed,
+            failed,
+          },
         }),
       });
 
-      const data = (await response.json().catch(() => ({}))) as BatchResponse;
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || "Failed to run daily backtest batch");
+      let deliveredCount = 0;
+      if (summaryResponse.ok) {
+        const summaryData = await summaryResponse.json();
+        if (summaryData.success) deliveredCount = summaryData.discordDelivered || 0;
       }
 
-      setResult(data);
-      setPlannedMarkets(data.plannedMarkets || []);
-      setMessage(
-        `Batch completed: ${data.completedCount || 0} done, ${data.failedCount || 0} failed, Discord sent ${data.discordDelivered || 0}.`,
-      );
+      // Phase 3: Final UI Update
+      setResult(prev => ({
+        ...prev!,
+        discordDelivered: deliveredCount,
+      }));
+      setMessage(`Batch completely finished: ${completed.length} done, ${failed.length} failed. Sent to Discord.`);
     } catch (error) {
-      setResult(null);
       setMessage(error instanceof Error ? error.message : "Unexpected error while running backtests");
     } finally {
       setLoading(false);
@@ -202,8 +272,8 @@ export default function AdminBacktestsPage() {
                   type="button"
                   onClick={() => setLimit(value)}
                   className={`rounded-2xl border px-4 py-2 text-sm font-semibold transition ${normalizedLimit === value
-                      ? "border-sky-500 bg-sky-600 text-white shadow-sm"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                    ? "border-sky-500 bg-sky-600 text-white shadow-sm"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
                     }`}
                 >
                   {value}
@@ -242,8 +312,8 @@ export default function AdminBacktestsPage() {
                   type="button"
                   onClick={() => toggleThemeFilter(theme.slug)}
                   className={`rounded-full border px-4 py-2 text-sm font-medium transition ${active
-                      ? "border-emerald-400 bg-emerald-600 text-white shadow-sm"
-                      : "border-slate-300 bg-slate-50 text-slate-700 hover:bg-white"
+                    ? "border-emerald-400 bg-emerald-600 text-white shadow-sm"
+                    : "border-slate-300 bg-slate-50 text-slate-700 hover:bg-white"
                     }`}
                 >
                   {theme.label}
@@ -357,72 +427,74 @@ export default function AdminBacktestsPage() {
         ) : null}
       </section>
 
-      {result ? (
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
-          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Requested</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">{result.batchSize || 0}</p>
-          </article>
-          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Completed</p>
-            <p className="mt-2 text-2xl font-semibold text-emerald-700">{result.completedCount || 0}</p>
-          </article>
-          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Failed</p>
-            <p className="mt-2 text-2xl font-semibold text-amber-700">{result.failedCount || 0}</p>
-          </article>
-          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Discord Delivered</p>
-            <p className="mt-2 text-2xl font-semibold text-sky-700">{result.discordDelivered || 0}</p>
-          </article>
-        </section>
-      ) : null}
+      <div className="mx-auto max-w-7xl space-y-6 mt-6">
+        {result ? (
+          <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Requested</p>
+              <p className="mt-2 text-2xl font-semibold text-slate-900">{result.batchSize || 0}</p>
+            </article>
+            <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Completed</p>
+              <p className="mt-2 text-2xl font-semibold text-emerald-700">{result.completedCount || 0}</p>
+            </article>
+            <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Failed</p>
+              <p className="mt-2 text-2xl font-semibold text-amber-700">{result.failedCount || 0}</p>
+            </article>
+            <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Discord Delivered</p>
+              <p className="mt-2 text-2xl font-semibold text-sky-700">{result.discordDelivered || 0}</p>
+            </article>
+          </section>
+        ) : null}
 
-      {result?.completed && result.completed.length > 0 ? (
-        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Completed Markets</h2>
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-190 border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-[0.12em] text-slate-500">
-                  <th className="px-3 py-2">Theme</th>
-                  <th className="px-3 py-2">Market</th>
-                  <th className="px-3 py-2">PnL</th>
-                  <th className="px-3 py-2">Return</th>
-                  <th className="px-3 py-2">Trades</th>
-                  <th className="px-3 py-2">Discord</th>
-                </tr>
-              </thead>
-              <tbody>
-                {result.completed.map((item) => (
-                  <tr key={`${item.marketId}-${item.clobTokenId}`} className="border-b border-slate-100 text-slate-700">
-                    <td className="px-3 py-2">{item.group}</td>
-                    <td className="px-3 py-2">{item.market}</td>
-                    <td className={`px-3 py-2 font-medium ${item.netPnL >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                      {item.netPnL >= 0 ? "+" : ""}
-                      {item.netPnL.toFixed(2)}
-                    </td>
-                    <td className="px-3 py-2">{item.returnPct.toFixed(2)}%</td>
-                    <td className="px-3 py-2">{item.tradesExecuted}</td>
-                    <td className="px-3 py-2">{item.discordSent ? "Sent" : "Skipped"}</td>
+        {result?.completed && result.completed.length > 0 ? (
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-900">Completed Markets</h2>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-190 border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-[0.12em] text-slate-500">
+                    <th className="px-3 py-2">Theme</th>
+                    <th className="px-3 py-2">Market</th>
+                    <th className="px-3 py-2">PnL</th>
+                    <th className="px-3 py-2">Return</th>
+                    <th className="px-3 py-2">Trades</th>
+                    <th className="px-3 py-2">Discord</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
+                </thead>
+                <tbody>
+                  {result.completed.map((item) => (
+                    <tr key={`${item.marketId}-${item.clobTokenId}`} className="border-b border-slate-100 text-slate-700">
+                      <td className="px-3 py-2">{item.group}</td>
+                      <td className="px-3 py-2">{item.market}</td>
+                      <td className={`px-3 py-2 font-medium ${item.netPnL >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                        {item.netPnL >= 0 ? "+" : ""}
+                        {item.netPnL.toFixed(2)}
+                      </td>
+                      <td className="px-3 py-2">{item.returnPct.toFixed(2)}%</td>
+                      <td className="px-3 py-2">{item.tradesExecuted}</td>
+                      <td className="px-3 py-2">{item.discordSent ? "Sent" : "Skipped"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
 
-      {result?.failed && result.failed.length > 0 ? (
-        <section className="rounded-3xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-amber-900">Failed Markets</h2>
-          <ul className="mt-3 space-y-2 text-sm text-amber-900">
-            {result.failed.map((item) => (
-              <li key={`${item.marketId}-${item.clobTokenId}`}>[{item.group}] {item.market}: {item.error}</li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+        {result?.failed && result.failed.length > 0 ? (
+          <section className="rounded-3xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-amber-900">Failed Markets</h2>
+            <ul className="mt-3 space-y-2 text-sm text-amber-900">
+              {result.failed.map((item) => (
+                <li key={`${item.marketId}-${item.clobTokenId}`}>[{item.group}] {item.market}: {item.error}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+      </div>
     </div>
   );
 }

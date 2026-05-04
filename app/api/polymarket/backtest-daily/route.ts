@@ -543,10 +543,69 @@ export async function POST(req: NextRequest) {
             previewOnly?: boolean;
             excludedClobTokenIds?: unknown;
             groupFilters?: unknown;
+            // Add support for frontend one-by-one processing
+            runSingleCandidate?: CandidateMarket;
+            sendSummary?: {
+                batchSize: number;
+                candidatesLength: number;
+                groupFilters: string[];
+                completed: BacktestRunSuccess[];
+                failed: any[];
+            };
         };
         const batchSize = normalizeBatchSize(body.limit);
         const excludedClobTokenIds = parseExcludedTokenIds(body.excludedClobTokenIds);
         const groupFilters = parseGroupFilters(body.groupFilters);
+
+        // 1. One-by-one single run from Frontend
+        if (body.runSingleCandidate) {
+            const result = await runBacktestForCandidate(req.nextUrl.origin, body.runSingleCandidate);
+            return NextResponse.json({ success: true, result });
+        }
+
+        // 2. Final summary block from Frontend
+        if (body.sendSummary) {
+            const { completed, failed, batchSize, candidatesLength, groupFilters } = body.sendSummary;
+
+            const completedDetails = completed.slice(0, 20).map((item) => ({
+                name: `✅ ${item.market}`,
+                value: `PnL: ${item.netPnL >= 0 ? "+" : ""}${item.netPnL.toFixed(2)} (${item.returnPct.toFixed(2)}%) | Trades: ${item.tradesExecuted}`,
+                inline: false,
+            }));
+
+            const failedDetails = failed.slice(0, 10).map((item) => ({
+                name: `❌ ${item.market}`,
+                value: `Error: ${item.error}`,
+                inline: false,
+            }));
+
+            const summaryFields = [
+                { name: "Run Type", value: "Daily batch (Manual UI trigger)", inline: true },
+                { name: "Batch Size", value: String(batchSize), inline: true },
+                { name: "Markets Selected", value: String(candidatesLength), inline: true },
+                { name: "✅ Completed", value: String(completed.length), inline: true },
+                { name: "❌ Failed", value: String(failed.length), inline: true },
+                { name: "Themes", value: groupFilters.join(", "), inline: false },
+                ...completedDetails,
+                ...failedDetails,
+            ];
+
+            await sendDiscordMessage({
+                title: "Polymarket Daily Backtest Batch Complete",
+                lines: [],
+                mention: false,
+                embed: {
+                    title: "Polymarket Daily Backtest Batch Complete",
+                    description: `Batch completed: ${completed.length} successful, ${failed.length} failed`,
+                    color: completed.length > 0 ? 3066993 : 15158332,
+                    fields: summaryFields,
+                    footerText: `Requested by ${user.name || user.email || `User ${user.id}`}`,
+                    timestamp: new Date().toISOString(),
+                },
+            });
+
+            return NextResponse.json({ success: true, discordDelivered: completed.length });
+        }
 
         if (body.previewOnly === true) {
             const plan = await getDailyBatchPreview(batchSize, excludedClobTokenIds, groupFilters);
