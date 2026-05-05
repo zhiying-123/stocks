@@ -560,6 +560,14 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
+        // Dynamically get the actual host to avoid localhost override from .env
+        const protocol = req.headers.get("x-forwarded-proto") || (req.url.startsWith("https") ? "https" : "http");
+        const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || req.nextUrl.host;
+        let actualOrigin = `${protocol}://${host}`;
+
+        // Remove trailing slash
+        actualOrigin = actualOrigin.replace(/\/+$/, '');
+
         const body = (await req.json().catch(() => ({}))) as {
             limit?: number;
             previewOnly?: boolean;
@@ -591,8 +599,7 @@ export async function POST(req: NextRequest) {
             const requestedBy = user.name || user.email || `User ${user.id}`;
             let delivered = 0;
 
-            const rawAppUrl = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
-            const appUrl = rawAppUrl.replace(/\/+$/, ''); // Remove trailing slashes to fix double slash issue
+            const appUrl = actualOrigin;
 
             // Sort by PnL desc so the best ones show first
             const sortedCompleted = [...completed].sort((a, b) => b.netPnL - a.netPnL);
@@ -654,7 +661,7 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        const result = await runDailyBatch(req.nextUrl.origin, batchSize, excludedClobTokenIds, groupFilters);
+        const result = await runDailyBatch(actualOrigin, batchSize, excludedClobTokenIds, groupFilters);
 
         return NextResponse.json({
             success: true,
