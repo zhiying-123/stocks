@@ -208,7 +208,9 @@ export default async function AnalyticsPage() {
     const { isLoggedIn, user } = await getAuthState();
 
     if (!isLoggedIn) {
-        redirect("/login");
+        // Fallback to login with standard paths. Path rewriting without middleware is challenging 
+        // to dynamically fetch query params in app router server components for analytics page.
+        redirect("/login?callbackUrl=/polymarket/analytics");
     }
 
     const { wallet, holdings, transactions, marketOptions } = await getAnalyticsData(user.id);

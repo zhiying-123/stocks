@@ -13,11 +13,7 @@ export default async function PolymarketLayout({
 }: {
     children: React.ReactNode;
 }) {
-    const { isLoggedIn } = await getAuthState();
-
-    if (!isLoggedIn) {
-        redirect("/login");
-    }
+    // Auth checks are handled by individual page components to support callbackUrls
 
     return (
         <div className="min-h-screen bg-white">

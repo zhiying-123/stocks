@@ -163,13 +163,13 @@ async function getUserWallet(userId: number) {
 
 export default async function MarketDetailPage({ params }: { params: Promise<{ tokenId: string }> }) {
     const { isLoggedIn, user } = await getAuthState();
-
-    if (!isLoggedIn) {
-        redirect("/login");
-    }
-
     const resolvedParams = await params;
     const tokenId = decodeURIComponent(resolvedParams.tokenId);
+
+    if (!isLoggedIn) {
+        redirect(`/login?callbackUrl=/polymarket/market/${encodeURIComponent(tokenId)}`);
+    }
+
     const marketInfo = await fetchMarketInfo(tokenId);
 
     if (!marketInfo) {

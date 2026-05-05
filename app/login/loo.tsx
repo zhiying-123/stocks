@@ -25,6 +25,15 @@ export default function LoginUI() {
       }
 
       const role = String(result.user?.role || "").toLowerCase();
+
+      const searchParams = new URLSearchParams(window.location.search);
+      const callbackUrl = searchParams.get('callbackUrl');
+
+      if (callbackUrl) {
+        window.location.href = callbackUrl;
+        return;
+      }
+
       if (role === "staff" || role === "admin") {
         window.location.href = "/admin/ops";
         return;

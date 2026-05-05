@@ -446,13 +446,21 @@ async function runDailyBatch(
     }
 
     const discordDelivered = completed.filter((item) => item.discordSent).length;
+    const rawOrigin = origin.replace(/\/+$/, '');
 
     // Build detailed results for Discord
-    const completedDetails = completed.slice(0, 20).map((item) => ({
-        name: `✅ ${item.market}`,
-        value: `PnL: ${item.netPnL >= 0 ? "+" : ""}${item.netPnL.toFixed(2)} (${item.returnPct.toFixed(2)}%) | Trades: ${item.tradesExecuted}`,
-        inline: false,
-    }));
+    const completedDetails = completed.slice(0, 20).map((item) => {
+        const pnlLine = item.netPnL >= 0
+            ? `\`\`\`ansi\n\u001b[1;32mPnL: +${item.netPnL.toFixed(2)} (${item.returnPct.toFixed(2)}%)\u001b[0m\n\`\`\``
+            : `\`\`\`ansi\n\u001b[1;31mPnL: ${item.netPnL.toFixed(2)} (${item.returnPct.toFixed(2)}%)\u001b[0m\n\`\`\``;
+
+        const idToUse = item.marketId || item.clobTokenId || "";
+        return {
+            name: `✅ ${item.market}`,
+            value: `[详细链接](${rawOrigin}/polymarket/market/${encodeURIComponent(idToUse)})\n${pnlLine}\nTrades: ${item.tradesExecuted}`,
+            inline: false,
+        };
+    });
 
     const failedDetails = failed.slice(0, 10).map((item) => ({
         name: `❌ ${item.market}`,
@@ -583,35 +591,40 @@ export async function POST(req: NextRequest) {
             const requestedBy = user.name || user.email || `User ${user.id}`;
             let delivered = 0;
 
+            const rawAppUrl = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
+            const appUrl = rawAppUrl.replace(/\/+$/, ''); // Remove trailing slashes to fix double slash issue
+
             // Sort by PnL desc so the best ones show first
             const sortedCompleted = [...completed].sort((a, b) => b.netPnL - a.netPnL);
 
-            // Chunk markets to avoid hitting the 4096 character limit of Embed Description
-            // This satisfies the requirement of having them grouped "as one big piece" separated by lines.
-            for (let i = 0; i < sortedCompleted.length; i += 10) {
-                const chunk = sortedCompleted.slice(i, i + 10);
+            // Send markets individually so they don't stick together visually in Discord
+            for (let i = 0; i < sortedCompleted.length; i++) {
+                const item = sortedCompleted[i];
+                const idToUse = item.marketId || item.clobTokenId || "";
+                const marketUrl = `${appUrl}/polymarket/market/${encodeURIComponent(idToUse)}`;
+                const isProfit = item.netPnL >= 0;
 
-                const descriptionLines = chunk.map(item => {
-                    const marketUrl = `${req.nextUrl.origin}/polymarket/market/${encodeURIComponent(item.clobTokenId)}`;
-                    return [
-                        `**[${item.market}](${marketUrl})**`,
-                        `**Net PnL:** \`${item.netPnL >= 0 ? "+" : ""}${item.netPnL.toFixed(2)} (${item.returnPct.toFixed(2)}%)\` | **Equity:** \`${Number(item.finalEquity).toFixed(2)}\``,
+                const embed = {
+                    title: item.market,
+                    url: marketUrl,
+                    color: isProfit ? 3066993 : 15158332, // Green if profit, Red if negative
+                    description: [
+                        `**Net PnL:** \`${isProfit ? "+" : ""}${item.netPnL.toFixed(2)} (${item.returnPct.toFixed(2)}%)\` | **Equity:** \`${Number(item.finalEquity).toFixed(2)}\``,
                         `**Vs B&H:** \`${Number(item.vsBuyAndHold).toFixed(2)} pp\` | **Max DD:** \`${Number(item.maxDrawdown).toFixed(2)}%\``,
                         `**Trades:** \`${item.tradesExecuted} (buy=${item.buyTrades}, sell=${item.sellTrades})\``,
                         `*[👉 Open Detail Page](${marketUrl})*`
-                    ].join('\n');
-                }).join('\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n');
-
-                const embed = {
-                    title: i === 0 ? "🏆 Polymarket Auto-Backtest Report" : "🏆 Polymarket Auto-Backtest Report (Cont.)",
-                    color: 3066993, // Green color as requested
-                    description: descriptionLines,
-                    footer: { text: `Requested by: ${requestedBy} • ${new Date().toISOString().replace('T', ' ').substring(0, 10).replace(/-/g, '/')}` }
+                    ].join('\n'),
+                    footer: i === sortedCompleted.length - 1 ? { text: `Requested by: ${requestedBy} • ${new Date().toISOString().replace('T', ' ').substring(0, 10).replace(/-/g, '/')}` } : undefined
                 };
 
                 try {
-                    await sendDiscordPayload({ content: "", embeds: [embed] });
-                    delivered += chunk.length;
+                    await sendDiscordPayload({
+                        content: i === 0 ? "🏆 **Polymarket Auto-Backtest Report**" : undefined,
+                        embeds: [embed]
+                    });
+                    delivered++;
+                    // Add small delay to avoid Discord rate limits (5 per 5 sec)
+                    await new Promise(r => setTimeout(r, 250));
                 } catch {
                     // ignore individual chunk failures
                 }
