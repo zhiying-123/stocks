@@ -20,6 +20,8 @@ type BacktestRequest = {
   initialCash?: number;
   initialPosition?: number;
   mode?: BacktestMode;
+  minPriceChangePercent?: number; // 最小价格变动百分比 (0-100)
+  cooldownHours?: number; // 冷却时间（小时）
 };
 
 type PricePoint = {
@@ -391,6 +393,15 @@ function validateRequest(body: BacktestRequest) {
     }
   }
 
+  const minPriceChangePercent = Number(body.minPriceChangePercent ?? 0);
+  const cooldownHours = Number(body.cooldownHours ?? 0);
+  if (!Number.isFinite(minPriceChangePercent) || minPriceChangePercent < 0 || minPriceChangePercent > 100) {
+    throw new Error("minPriceChangePercent must be between 0 and 100");
+  }
+  if (!Number.isFinite(cooldownHours) || cooldownHours < 0) {
+    throw new Error("cooldownHours must be non-negative");
+  }
+
   return {
     marketId,
     action: action as AutoTradeAction,
@@ -406,6 +417,8 @@ function validateRequest(body: BacktestRequest) {
     initialCash,
     initialPosition,
     mode: mode as BacktestMode,
+    minPriceChangePercent,
+    cooldownHours,
     startUnix,
     endUnix,
   };
@@ -453,39 +466,42 @@ export async function POST(req: NextRequest) {
     let realizedPnL = 0;
     let positionAvgCost = config.initialPosition > 0 ? firstPrice : 0;
 
+    // Simplified Time-based Model: Buy in first hour, Sell in 3 hours
+    const startTimestamp = prices.length > 0 ? prices[0].timestamp : 0;
+    const FIRST_HOUR_MS = 60 * 60 * 1000;
+    const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+
+    // Repeat interval (hours) - default 6 hours
+    const repeatIntervalHours = (config as any).repeatIntervalHours ?? 6;
+    const REPEAT_INTERVAL_MS = repeatIntervalHours * 60 * 60 * 1000;
+
+    const cycleMap = new Map<number, { bought: boolean; buyTimestamp?: number; sold: boolean }>();
+
     for (let index = 0; index < prices.length; index += 1) {
       const point = prices[index];
-      const triggerValue = config.triggerType === "PRICE_TARGET"
-        ? config.targetPrice
-        : index + 1 >= (config.movingAverageDays || 0)
-          ? prices
-            .slice(index + 1 - (config.movingAverageDays || 0), index + 1)
-            .reduce((sum, item) => sum + item.price, 0) / (config.movingAverageDays || 1)
-          : null;
 
       let buyMatched = false;
       let sellMatched = false;
-      let buyTriggerForLog: number | null = triggerValue;
-      let sellTriggerForLog: number | null = triggerValue;
+      let buyTriggerForLog: number | null = null;
+      let sellTriggerForLog: number | null = null;
 
-      if (config.action === "BOTH" && config.triggerType === "PRICE_TARGET") {
-        buyTriggerForLog = config.buyTargetPrice;
-        sellTriggerForLog = config.sellTargetPrice;
-        buyMatched = buyTriggerForLog !== null && point.price <= buyTriggerForLog;
-        sellMatched = sellTriggerForLog !== null && point.price >= sellTriggerForLog;
-      } else {
-        const oppositeDirection: TriggerDirection = config.direction === "ABOVE" ? "BELOW" : "ABOVE";
-        const primaryMatched = triggerValue !== null && isTriggered(config.direction, point.price, triggerValue);
-        const oppositeMatched = triggerValue !== null && isTriggered(oppositeDirection, point.price, triggerValue);
+      const elapsedMsFromStart = point.timestamp - startTimestamp;
 
-        if (config.action === "BUY") {
-          buyMatched = primaryMatched;
-        } else if (config.action === "SELL") {
-          sellMatched = primaryMatched;
-        } else {
-          buyMatched = primaryMatched;
-          sellMatched = oppositeMatched;
-        }
+      // Determine cycle index
+      const cycleIndex = Math.floor(Math.max(0, point.timestamp - startTimestamp) / REPEAT_INTERVAL_MS);
+      const cycleStart = startTimestamp + cycleIndex * REPEAT_INTERVAL_MS;
+      const cycle = cycleMap.get(cycleIndex) || { bought: false, sold: false };
+
+      // Buy in the first hour of each cycle
+      if (!cycle.bought && point.timestamp - cycleStart <= FIRST_HOUR_MS) {
+        buyMatched = true;
+        buyTriggerForLog = point.price;
+      }
+
+      // Sell 3 hours after the buy in that cycle
+      if (cycle.bought && !cycle.sold && cycle.buyTimestamp != null && point.timestamp - cycle.buyTimestamp >= THREE_HOURS_MS) {
+        sellMatched = true;
+        sellTriggerForLog = point.price;
       }
 
       if (buyMatched || sellMatched) {
@@ -504,6 +520,7 @@ export async function POST(req: NextRequest) {
               totalBoughtCost += requiredCash;
               totalBoughtQty += config.quantity;
               buyTrades += 1;
+              cycleMap.set(cycleIndex, { bought: true, buyTimestamp: point.timestamp, sold: false });
               trades.push({
                 date: toISODateTime(point.timestamp),
                 action: "BUY",
@@ -512,6 +529,7 @@ export async function POST(req: NextRequest) {
                 cashAfter: cash,
                 positionAfter: position,
                 triggerValue: buyTriggerForLog as number,
+                pnl: 0,
               });
             } else {
               skippedMatches.push({
@@ -529,7 +547,8 @@ export async function POST(req: NextRequest) {
               const proceeds = point.price * config.quantity;
               cash += proceeds;
               position -= config.quantity;
-              realizedPnL += (point.price - positionAvgCost) * config.quantity;
+              const tradePnL = (point.price - positionAvgCost) * config.quantity;
+              realizedPnL += tradePnL;
               if (position <= 0) {
                 position = 0;
                 positionAvgCost = 0;
@@ -537,6 +556,7 @@ export async function POST(req: NextRequest) {
               totalSoldProceeds += proceeds;
               totalSoldQty += config.quantity;
               sellTrades += 1;
+              cycleMap.set(cycleIndex, { ...(cycle || { bought: true }), sold: true, buyTimestamp: cycle?.buyTimestamp });
               trades.push({
                 date: toISODateTime(point.timestamp),
                 action: "SELL",
@@ -545,6 +565,7 @@ export async function POST(req: NextRequest) {
                 cashAfter: cash,
                 positionAfter: position,
                 triggerValue: sellTriggerForLog as number,
+                pnl: tradePnL,
               });
             } else {
               skippedMatches.push({
@@ -565,7 +586,8 @@ export async function POST(req: NextRequest) {
             const proceeds = point.price * config.quantity;
             cash += proceeds;
             position -= config.quantity;
-            realizedPnL += (point.price - positionAvgCost) * config.quantity;
+            const tradePnL = (point.price - positionAvgCost) * config.quantity;
+            realizedPnL += tradePnL;
             if (position <= 0) {
               position = 0;
               positionAvgCost = 0;
@@ -581,6 +603,7 @@ export async function POST(req: NextRequest) {
               cashAfter: cash,
               positionAfter: position,
               triggerValue: sellTriggerForLog as number,
+              pnl: tradePnL,
             });
           } else if (shouldBuy) {
             const requiredCash = point.price * config.quantity;
@@ -594,6 +617,7 @@ export async function POST(req: NextRequest) {
             totalBoughtCost += requiredCash;
             totalBoughtQty += config.quantity;
             buyTrades += 1;
+            cycleMap.set(cycleIndex, { bought: true, buyTimestamp: point.timestamp, sold: false });
             trades.push({
               date: toISODateTime(point.timestamp),
               action: "BUY",
@@ -602,6 +626,7 @@ export async function POST(req: NextRequest) {
               cashAfter: cash,
               positionAfter: position,
               triggerValue: buyTriggerForLog as number,
+              pnl: 0,
             });
           } else if (sellMatched && position < config.quantity) {
             skippedMatches.push({
@@ -629,7 +654,31 @@ export async function POST(req: NextRequest) {
       equityCurve.push(cash + position * point.price);
     }
 
-    const lastPrice = prices[prices.length - 1].price;
+    // If we still hold a position at the end, force-close it at the final price (liquidation)
+    const finalPoint = prices[prices.length - 1];
+    if (position > 0) {
+      const proceeds = finalPoint.price * position;
+      cash += proceeds;
+      const tradePnL = (finalPoint.price - positionAvgCost) * position;
+      realizedPnL += tradePnL;
+      totalSoldProceeds += proceeds;
+      totalSoldQty += position;
+      sellTrades += 1;
+      trades.push({
+        date: toISODateTime(finalPoint.timestamp),
+        action: "SELL",
+        price: finalPoint.price,
+        quantity: position,
+        cashAfter: cash,
+        positionAfter: 0,
+        triggerValue: finalPoint.price,
+        pnl: tradePnL,
+      });
+      position = 0;
+      positionAvgCost = 0;
+    }
+
+    const lastPrice = finalPoint.price;
     const lowPrice = prices.reduce((min, point) => Math.min(min, point.price), prices[0].price);
     const highPrice = prices.reduce((max, point) => Math.max(max, point.price), prices[0].price);
     const initialEquity = config.initialCash + config.initialPosition * firstPrice;

@@ -1326,19 +1326,27 @@ export default function PolymarketAnalyticsUI({
                                             <th className="py-2 pr-4 font-semibold">Qty</th>
                                             <th className="py-2 pr-4 font-semibold">Trigger</th>
                                             <th className="py-2 pr-4 font-semibold">Cash After</th>
-                                            <th className="py-2 pr-4 font-semibold">Position After</th>
+                                            <th className="py-2 pr-4 font-semibold">Pos After</th>
+                                            <th className="py-2 pr-4 font-semibold">PnL</th>
                                         </tr>
                                     </thead>
                                     <tbody className="text-gray-700">
                                         {latestExecutedTrades.map((trade, index) => (
                                             <tr key={`${trade.date}-${trade.action}-${index}`} className="border-b border-gray-100 last:border-b-0 odd:bg-gray-50/40">
                                                 <td className="py-2 pr-4 whitespace-nowrap">{trade.date}</td>
-                                                <td className="py-2 pr-4 font-medium">{trade.action}</td>
+                                                <td className="py-2 pr-4 font-medium">
+                                                    <span className={trade.action === 'BUY' ? 'text-blue-600' : 'text-red-500'}>{trade.action}</span>
+                                                </td>
                                                 <td className="py-2 pr-4">{formatFixed(trade.price, 4)}</td>
                                                 <td className="py-2 pr-4">{formatFixed(trade.quantity, 2)}</td>
                                                 <td className="py-2 pr-4">{formatFixed(trade.triggerValue, 4)}</td>
                                                 <td className="py-2 pr-4">{formatFixed(trade.cashAfter, 2)}</td>
                                                 <td className="py-2 pr-4">{formatFixed(trade.positionAfter, 2)}</td>
+                                                <td className={`py-2 pr-4 font-medium whitespace-nowrap ${(trade as any).pnl && (trade as any).pnl > 0 ? 'text-green-600' :
+                                                        (trade as any).pnl && (trade as any).pnl < 0 ? 'text-red-500' : 'text-gray-400'
+                                                    }`}>
+                                                    {(trade as any).pnl ? ((trade as any).pnl > 0 ? '+' : '') + formatFixed((trade as any).pnl, 2) : '-'}
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>

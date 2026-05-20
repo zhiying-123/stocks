@@ -332,6 +332,8 @@ async function runBacktestForCandidate(origin: string, candidate: CandidateMarke
             end: window.end,
             initialCash: 1000,
             initialPosition: 0,
+            minPriceChangePercent: 1, // 价格必须变动至少1%才交易 - 减少交易频率
+            cooldownHours: 2, // 每次交易后等待2小时 - 减少交易频率
             mode: "repeat",
         } as any);
 
@@ -637,6 +639,33 @@ export async function POST(req: NextRequest) {
                 }
             }
 
+            // Persist completed backtests to DB (best-effort)
+            try {
+                const createItems = sortedCompleted.map((item) => ({
+                    market_id: item.marketId || item.clobTokenId || item.market || "",
+                    clob_token_id: item.clobTokenId || null,
+                    market_name: item.market,
+                    group_name: item.group,
+                    net_pnl: Number(item.netPnL || 0),
+                    return_pct: Number(item.returnPct || 0),
+                    trades_count: Number(item.tradesExecuted || 0),
+                    start_date: String(item.windowStart || ""),
+                    end_date: String(item.windowEnd || ""),
+                    initial_cash: 1000,
+                    final_equity: Number(item.finalEquity || 0),
+                    vs_buy_hold: Number(item.vsBuyAndHold || 0),
+                    max_drawdown: Number(item.maxDrawdown || 0),
+                }));
+
+                if (createItems.length > 0) {
+                    await prisma.backtestHistory.createMany({ data: createItems });
+                }
+            } catch (err) {
+                // Best-effort: don't fail the request if DB write fails
+                // eslint-disable-next-line no-console
+                console.error("Failed to persist backtest history (sendSummary):", err);
+            }
+
             return NextResponse.json({ success: true, discordDelivered: delivered });
         }
 
@@ -662,6 +691,34 @@ export async function POST(req: NextRequest) {
         }
 
         const result = await runDailyBatch(actualOrigin, batchSize, excludedClobTokenIds, groupFilters);
+
+        // Persist completed backtests to DB (best-effort)
+        try {
+            const completed = (result as any).completed || [];
+            const createItems = completed.map((item: any) => ({
+                market_id: item.marketId || item.clobTokenId || item.market || "",
+                clob_token_id: item.clobTokenId || null,
+                market_name: item.market,
+                group_name: item.group,
+                net_pnl: Number(item.netPnL || 0),
+                return_pct: Number(item.returnPct || 0),
+                trades_count: Number(item.tradesExecuted || 0),
+                start_date: String(item.windowStart || ""),
+                end_date: String(item.windowEnd || ""),
+                initial_cash: 1000,
+                final_equity: Number(item.finalEquity || 0),
+                vs_buy_hold: Number(item.vsBuyAndHold || 0),
+                max_drawdown: Number(item.maxDrawdown || 0),
+            }));
+
+            if (createItems.length > 0) {
+                await prisma.backtestHistory.createMany({ data: createItems });
+            }
+        } catch (err) {
+            // Best-effort: log and continue
+            // eslint-disable-next-line no-console
+            console.error("Failed to persist backtest history (manual run):", err);
+        }
 
         return NextResponse.json({
             success: true,

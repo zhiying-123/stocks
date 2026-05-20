@@ -12,6 +12,7 @@ interface BacktestTrade {
     date: string;
     action: 'BUY' | 'SELL';
     price: number;
+    pnl?: number;
 }
 
 interface NormalizedPoint {
@@ -151,31 +152,31 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
 
     // Auto-run backtest with default parameters
     useEffect(() => {
-            if (!tokenId || !rawHistory || rawHistory.length === 0) return;
+        if (!tokenId || !rawHistory || rawHistory.length === 0) return;
         let cancelled = false;
 
         async function runBacktest() {
             setBacktestLoading(true);
             try {
                 // Analyze market price range from full history
-                    // Normalize prices from raw history
-                    const allYesPrices: number[] = [];
-                    for (const item of rawHistory) {
-                        const pRaw = (item as any).p ?? (item as any).price;
-                        const price = typeof pRaw === 'string' ? parseFloat(pRaw) : Number(pRaw);
-                        if (!isNaN(price)) {
-                            allYesPrices.push(price);
-                        }
+                // Normalize prices from raw history
+                const allYesPrices: number[] = [];
+                for (const item of rawHistory) {
+                    const pRaw = (item as any).p ?? (item as any).price;
+                    const price = typeof pRaw === 'string' ? parseFloat(pRaw) : Number(pRaw);
+                    if (!isNaN(price)) {
+                        allYesPrices.push(price);
                     }
-                    if (allYesPrices.length === 0) return;
+                }
+                if (allYesPrices.length === 0) return;
                 const minPrice = Math.min(...allYesPrices);
                 const maxPrice = Math.max(...allYesPrices);
                 const midPrice = (minPrice + maxPrice) / 2;
-                
+
                 // Set buy target to lower quartile, sell target to upper quartile
                 const buyTarget = Math.max(0.01, minPrice + (midPrice - minPrice) * 0.25); // 25% from min
                 const sellTarget = Math.min(0.99, midPrice + (maxPrice - midPrice) * 0.75); // 75% towards max
-                
+
                 const payload = {
                     marketId: tokenId,
                     action: 'BOTH',
@@ -192,7 +193,7 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                 };
                 console.log('[MarketDetail Backtest] Market analysis:', { minPrice, maxPrice, midPrice, buyTarget, sellTarget });
                 console.log('[MarketDetail Backtest] Running with payload:', payload);
-                
+
                 const res = await fetch('/api/polymarket/backtest-auto-buy-sell', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -234,7 +235,7 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
             cancelled = true;
             clearTimeout(timer);
         };
-        }, [tokenId, rawHistory]);
+    }, [tokenId, rawHistory]);
 
     // Normalize raw history from API into uniform structure
     const normalizedHistory: NormalizedPoint[] = useMemo(() => {
@@ -312,12 +313,12 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
         // Use full normalized history if we have backtest trades, otherwise use filtered history
         // This ensures buy/sell points from early in the 30-day period are visible
         const historyToUse = backtestTrades.length > 0 ? normalizedHistory : filteredHistory;
-        
+
         if (historyToUse.length === 0) return null;
 
         const yesPrices = historyToUse.map((p) => p.price * 100);
         const noPrices = yesPrices.map((price) => 100 - price);
-        
+
         // Include backtest buy/sell prices in the price range calculation
         let allPrices = [...yesPrices, ...noPrices];
         if (backtestTrades.length > 0) {
@@ -329,7 +330,7 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                 .map(t => t.price * 100);
             allPrices = [...allPrices, ...buyPrices, ...sellPrices];
         }
-        
+
         const rawMin = Math.min(...allPrices);
         const rawMax = Math.max(...allPrices);
 
@@ -378,9 +379,9 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
         let sellLinePoints: { x: number; y: number; price: number; tradeDate: string }[] = [];
 
         if (backtestTrades.length > 0) {
-              for (const trade of backtestTrades) {
+            for (const trade of backtestTrades) {
                 const tradeDate = new Date(trade.date);
-                
+
                 // Find closest history point in the chart's history
                 let closestIdx = 0;
                 let minDiff = Math.abs(historyToUse[0].time.getTime() - tradeDate.getTime());
@@ -402,17 +403,17 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                     sellLinePoints.push({ x: point.x, y: tradeY, price: tradeValue, tradeDate: trade.date });
                 }
             }
-            
+
             // If no sell trades found, create a synthetic sell line from max price
             if (sellLinePoints.length === 0 && buyLinePoints.length > 0) {
                 const maxYesPrice = Math.max(...yesPrices);
                 const maxY = padTop + chartH - ((maxYesPrice - yMin) / yRange) * chartH;
-                
+
                 // Create sell points at roughly equal intervals matching buy points
                 for (let i = 0; i < buyLinePoints.length; i++) {
                     const sellPrice = maxYesPrice + (Math.random() * 5); // Add slight variance
                     const sellY = padTop + chartH - ((sellPrice - yMin) / yRange) * chartH;
-                    sellLinePoints.push({ 
+                    sellLinePoints.push({
                         x: buyLinePoints[i].x + (chartW / buyLinePoints.length) * (i % 3 + 1),
                         y: sellY,
                         price: sellPrice,
@@ -477,7 +478,7 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
             });
         }
 
-            return { pointData, yesLinePath, noLinePath, buyLinePath, sellLinePath, buyFirst, sellFirst, areaPath, xLabels, yLines, W, H, padLeft, padRight, padTop, padBottom, chartW, chartH, bottomY };
+        return { pointData, yesLinePath, noLinePath, buyLinePath, sellLinePath, buyLinePoints, sellLinePoints, buyFirst, sellFirst, areaPath, xLabels, yLines, W, H, padLeft, padRight, padTop, padBottom, chartW, chartH, bottomY };
     }, [filteredHistory, timeRange, backtestTrades, normalizedHistory]);
 
     const hoveredPoint = hoveredPointIndex != null ? chartData?.pointData[hoveredPointIndex] : null;
@@ -1016,41 +1017,20 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                                 />
                                             ) : null}
 
-                                            {/* BUY line (high-contrast for visibility) */}
-                                            {chartData.buyLinePath ? (
-                                                <path
-                                                    d={chartData.buyLinePath}
-                                                    fill="none"
-                                                    stroke="#06b6d4"
-                                                    strokeWidth="3"
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    strokeDasharray="4 4"
-                                                    opacity="1"
-                                                />
-                                            ) : null}
+                                            {/* Action Points */}
+                                            {chartData.buyLinePoints?.map((pt, i) => (
+                                                <g key={`buy-${i}`}>
+                                                    <circle cx={pt.x} cy={pt.y} r="4" fill="#06b6d4" />
+                                                    <text x={pt.x} y={pt.y - 8} fill="#06b6d4" fontSize={10} fontWeight={700} textAnchor="middle">Buy</text>
+                                                </g>
+                                            ))}
 
-                                            {/* SELL line (high-contrast for visibility) */}
-                                            {chartData.sellLinePath ? (
-                                                <path
-                                                    d={chartData.sellLinePath}
-                                                    fill="none"
-                                                    stroke="#ef4444"
-                                                    strokeWidth="3"
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    strokeDasharray="4 4"
-                                                    opacity="1"
-                                                />
-                                            ) : null}
-
-                                            {/* Debug labels for first buy/sell point to confirm visibility */}
-                                            {chartData.buyFirst ? (
-                                                <text x={chartData.buyFirst.x} y={chartData.buyFirst.y - 8} fill="#06b6d4" fontSize={11} fontWeight={700} textAnchor="middle">Buy</text>
-                                            ) : null}
-                                            {chartData.sellFirst ? (
-                                                <text x={chartData.sellFirst.x} y={chartData.sellFirst.y - 8} fill="#ef4444" fontSize={11} fontWeight={700} textAnchor="middle">Sell</text>
-                                            ) : null}
+                                            {chartData.sellLinePoints?.map((pt, i) => (
+                                                <g key={`sell-${i}`}>
+                                                    <circle cx={pt.x} cy={pt.y} r="4" fill="#ef4444" />
+                                                    <text x={pt.x} y={pt.y - 8} fill="#ef4444" fontSize={10} fontWeight={700} textAnchor="middle">Sell</text>
+                                                </g>
+                                            ))}
 
 
 
@@ -1169,6 +1149,48 @@ export default function MarketDetailUI({ marketInfo, tokenId, currency, isInWatc
                                 <div className="mt-3 text-xs text-red-500">{error}</div>
                             )}
                         </div>
+
+                        {/* Backtest Trades List */}
+                        {backtestTrades && backtestTrades.length > 0 && (
+                            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm mb-6">
+                                <h3 className="text-lg font-bold text-gray-900 mb-4">Backtest Trades</h3>
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full text-sm text-left">
+                                        <thead className="bg-gray-50 text-gray-600">
+                                            <tr>
+                                                <th className="px-4 py-2 font-medium rounded-tl-lg">Date</th>
+                                                <th className="px-4 py-2 font-medium">Action</th>
+                                                <th className="px-4 py-2 font-medium">Price</th>
+                                                <th className="px-4 py-2 font-medium rounded-tr-lg text-right">Profit/Loss</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {backtestTrades.map((t, idx) => (
+                                                <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                                                    <td className="px-4 py-3 font-mono text-xs text-gray-500">
+                                                        {new Date(t.date).toISOString().replace('T', ' ').substring(0, 16)}
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${t.action === 'BUY' ? 'bg-cyan-50 text-cyan-700' : 'bg-red-50 text-red-700'
+                                                            }`}>
+                                                            {t.action}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 font-medium">
+                                                        {(t.price * 100).toFixed(1)}¢
+                                                    </td>
+                                                    <td className={`px-4 py-3 text-right font-medium ${t.pnl && t.pnl > 0 ? 'text-green-600' :
+                                                            t.pnl && t.pnl < 0 ? 'text-red-500' : 'text-gray-400'
+                                                        }`}>
+                                                        {t.pnl ? (t.pnl > 0 ? '+' : '') + t.pnl.toFixed(2) : '-'}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
 
                         <SocialPanel
                             marketId={tokenId}

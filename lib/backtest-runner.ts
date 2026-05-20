@@ -20,6 +20,8 @@ export type BacktestRequest = {
     initialCash?: number;
     initialPosition?: number;
     mode?: BacktestMode;
+    minPriceChangePercent?: number; // 最小价格变动百分比 (0-100)，如果价格变动小于这个百分比就不交易
+    cooldownHours?: number; // 冷却时间（小时），交易后必须等待这么久才能再交易
 };
 
 type PricePoint = { timestamp: number; price: number };
@@ -350,43 +352,160 @@ export async function runBacktest(body: BacktestRequest) {
     let sellTrades = 0;
     let realizedPnL = 0;
     let positionAvgCost = config.initialPosition && config.initialPosition > 0 ? firstPrice : 0;
+    let hasSold = false;
+
+    // Control parameters for trade frequency
+    const minPriceChangePercent = config.minPriceChangePercent ?? 0; // 默认0 = 所有价格变化都触发
+    const cooldownHours = config.cooldownHours ?? 0; // 默认0 = 无冷却时间
+    const COOLDOWN_MS = cooldownHours * 60 * 60 * 1000;
+    
+    // Track last trade timing and price
+    let lastBuyTimestamp = -Infinity;
+    let lastBuyPrice = 0;
+    let lastSellTimestamp = -Infinity;
+    let lastSellPrice = 0;
+
+    // Market-condition based model: Buy/Sell based on price targets or moving averages
+    const startTimestamp = prices.length > 0 ? prices[0].timestamp : 0;
+    
+    // Calculate moving average if needed
+    let movingAverages: number[] = [];
+    if (config.triggerType === "MOVING_AVERAGE" && config.movingAverageDays) {
+        const windowSize = Math.max(1, config.movingAverageDays);
+        movingAverages = new Array(prices.length);
+        for (let i = 0; i < prices.length; i++) {
+            const start = Math.max(0, i - windowSize + 1);
+            let sum = 0;
+            for (let j = start; j <= i; j++) {
+                sum += prices[j].price;
+            }
+            movingAverages[i] = sum / (i - start + 1);
+        }
+    }
+
+    // Track position state for each trade
+    const positionHistory: Array<{ index: number; price: number; action: "BUY" | "SELL" }> = [];
 
     for (let index = 0; index < prices.length; index += 1) {
         const point = prices[index];
-        const triggerValue = config.triggerType === "PRICE_TARGET"
-            ? config.targetPrice
-            : index + 1 >= (config.movingAverageDays || 0)
-                ? prices
-                    .slice(index + 1 - (config.movingAverageDays || 0), index + 1)
-                    .reduce((sum, item) => sum + item.price, 0) / (config.movingAverageDays || 1)
-                : null;
 
         let buyMatched = false;
         let sellMatched = false;
-        let buyTriggerForLog: number | null = triggerValue as any;
-        let sellTriggerForLog: number | null = triggerValue as any;
 
-        if (config.action === "BOTH" && config.triggerType === "PRICE_TARGET") {
-            buyTriggerForLog = config.buyTargetPrice as number;
-            sellTriggerForLog = config.sellTargetPrice as number;
-            buyMatched = buyTriggerForLog !== null && point.price <= buyTriggerForLog;
-            sellMatched = sellTriggerForLog !== null && point.price >= sellTriggerForLog;
-        } else {
-            const oppositeDirection: TriggerDirection = config.direction === "ABOVE" ? "BELOW" : "ABOVE";
-            const primaryMatched = triggerValue != null && (config.direction === "ABOVE" ? point.price >= triggerValue : point.price <= triggerValue);
-            const oppositeMatched = triggerValue != null && (oppositeDirection === "ABOVE" ? point.price >= triggerValue : point.price <= triggerValue);
-            if (config.action === "BUY") {
-                buyMatched = primaryMatched;
-            } else if (config.action === "SELL") {
-                sellMatched = primaryMatched;
-            } else {
-                buyMatched = primaryMatched;
-                sellMatched = oppositeMatched;
+        // Determine triggers based on trigger type
+        if (config.triggerType === "PRICE_TARGET") {
+            // For BUY or BOTH: check if price reaches buyTargetPrice
+            if ((config.action === "BUY" || config.action === "BOTH") && config.buyTargetPrice != null) {
+                if (config.direction === "ABOVE" && point.price >= config.buyTargetPrice) {
+                    buyMatched = true;
+                } else if (config.direction === "BELOW" && point.price <= config.buyTargetPrice) {
+                    buyMatched = true;
+                }
+            }
+            // For SELL or BOTH: check if price reaches sellTargetPrice
+            if ((config.action === "SELL" || config.action === "BOTH") && config.sellTargetPrice != null) {
+                if (config.direction === "ABOVE" && point.price >= config.sellTargetPrice) {
+                    sellMatched = true;
+                } else if (config.direction === "BELOW" && point.price <= config.sellTargetPrice) {
+                    sellMatched = true;
+                }
+            }
+        } else if (config.triggerType === "MOVING_AVERAGE" && movingAverages.length > 0) {
+            const ma = movingAverages[index];
+            // For BUY: price crosses above MA
+            if ((config.action === "BUY" || config.action === "BOTH") && config.direction === "ABOVE") {
+                if (index > 0 && prices[index - 1].price <= movingAverages[index - 1] && point.price > ma) {
+                    buyMatched = true;
+                }
+            }
+            // For BUY: price crosses below MA
+            if ((config.action === "BUY" || config.action === "BOTH") && config.direction === "BELOW") {
+                if (index > 0 && prices[index - 1].price >= movingAverages[index - 1] && point.price < ma) {
+                    buyMatched = true;
+                }
+            }
+            // For SELL: price crosses above MA
+            if ((config.action === "SELL" || config.action === "BOTH") && config.direction === "ABOVE") {
+                if (index > 0 && prices[index - 1].price <= movingAverages[index - 1] && point.price > ma) {
+                    sellMatched = true;
+                }
+            }
+            // For SELL: price crosses below MA
+            if ((config.action === "SELL" || config.action === "BOTH") && config.direction === "BELOW") {
+                if (index > 0 && prices[index - 1].price >= movingAverages[index - 1] && point.price < ma) {
+                    sellMatched = true;
+                }
+            }
+        }
+
+        // Apply cooldown and minimum price change filters
+        if (buyMatched) {
+            const timeSinceLastBuy = (point.timestamp * 1000 - lastBuyTimestamp) / 1000; // convert to seconds
+            const cooldownSeconds = COOLDOWN_MS / 1000;
+            if (timeSinceLastBuy < cooldownSeconds) {
+                buyMatched = false; // Still in cooldown period
+            } else if (minPriceChangePercent > 0 && lastBuyPrice > 0) {
+                const priceChange = Math.abs(point.price - lastBuyPrice) / lastBuyPrice * 100;
+                if (priceChange < minPriceChangePercent) {
+                    buyMatched = false; // Price change too small
+                }
+            }
+        }
+
+        if (sellMatched) {
+            const timeSinceLastSell = (point.timestamp * 1000 - lastSellTimestamp) / 1000; // convert to seconds
+            const cooldownSeconds = COOLDOWN_MS / 1000;
+            if (timeSinceLastSell < cooldownSeconds) {
+                sellMatched = false; // Still in cooldown period
+            } else if (minPriceChangePercent > 0 && lastSellPrice > 0) {
+                const priceChange = Math.abs(point.price - lastSellPrice) / lastSellPrice * 100;
+                if (priceChange < minPriceChangePercent) {
+                    sellMatched = false; // Price change too small
+                }
             }
         }
 
         if (buyMatched || sellMatched) {
-            if (config.action === "BUY") {
+            if (config.action === "BUY" && buyMatched) {
+                matchedSignals += 1;
+                const requiredCash = point.price * config.quantity;
+                if (cash >= requiredCash) {
+                    const prevPosition = position;
+                    const prevCostBasis = positionAvgCost;
+                    cash -= requiredCash;
+                    position += config.quantity;
+                    positionAvgCost = position > 0 ? ((prevPosition * prevCostBasis) + requiredCash) / position : 0;
+                    totalBoughtCost += requiredCash;
+                    totalBoughtQty += config.quantity;
+                    buyTrades += 1;
+                    hasSold = false;
+                    lastBuyTimestamp = point.timestamp * 1000; // Update last buy time
+                    lastBuyPrice = point.price; // Update last buy price
+                    trades.push({ date: toISODateTime(point.timestamp), action: "BUY", price: point.price, quantity: config.quantity });
+                    positionHistory.push({ index, price: point.price, action: "BUY" });
+                } else {
+                    skippedMatches.push({ date: toISODateTime(point.timestamp), reason: 'Insufficient cash', price: point.price });
+                }
+            } else if (config.action === "SELL" && sellMatched) {
+                matchedSignals += 1;
+                if (position >= config.quantity) {
+                    const proceeds = point.price * config.quantity;
+                    cash += proceeds;
+                    position -= config.quantity;
+                    realizedPnL += (point.price - positionAvgCost) * config.quantity;
+                    if (position <= 0) { position = 0; positionAvgCost = 0; }
+                    totalSoldProceeds += proceeds;
+                    totalSoldQty += config.quantity;
+                    sellTrades += 1;
+                    hasSold = true;
+                    lastSellTimestamp = point.timestamp * 1000; // Update last sell time
+                    lastSellPrice = point.price; // Update last sell price
+                    trades.push({ date: toISODateTime(point.timestamp), action: "SELL", price: point.price, quantity: config.quantity });
+                    positionHistory.push({ index, price: point.price, action: "SELL" });
+                } else {
+                    skippedMatches.push({ date: toISODateTime(point.timestamp), reason: 'Insufficient position', price: point.price });
+                }
+            } else if (config.action === "BOTH") {
                 if (buyMatched) {
                     matchedSignals += 1;
                     const requiredCash = point.price * config.quantity;
@@ -399,12 +518,15 @@ export async function runBacktest(body: BacktestRequest) {
                         totalBoughtCost += requiredCash;
                         totalBoughtQty += config.quantity;
                         buyTrades += 1;
+                        hasSold = false;
+                        lastBuyTimestamp = point.timestamp * 1000; // Update last buy time
+                        lastBuyPrice = point.price; // Update last buy price
                         trades.push({ date: toISODateTime(point.timestamp), action: "BUY", price: point.price, quantity: config.quantity });
+                        positionHistory.push({ index, price: point.price, action: "BUY" });
                     } else {
                         skippedMatches.push({ date: toISODateTime(point.timestamp), reason: 'Insufficient cash', price: point.price });
                     }
                 }
-            } else if (config.action === "SELL") {
                 if (sellMatched) {
                     matchedSignals += 1;
                     if (position >= config.quantity) {
@@ -416,36 +538,14 @@ export async function runBacktest(body: BacktestRequest) {
                         totalSoldProceeds += proceeds;
                         totalSoldQty += config.quantity;
                         sellTrades += 1;
+                        hasSold = true;
+                        lastSellTimestamp = point.timestamp * 1000; // Update last sell time
+                        lastSellPrice = point.price; // Update last sell price
                         trades.push({ date: toISODateTime(point.timestamp), action: "SELL", price: point.price, quantity: config.quantity });
+                        positionHistory.push({ index, price: point.price, action: "SELL" });
                     } else {
                         skippedMatches.push({ date: toISODateTime(point.timestamp), reason: 'Insufficient position', price: point.price });
                     }
-                }
-            } else {
-                const shouldSell = sellMatched && position >= config.quantity;
-                const shouldBuy = buyMatched && cash >= point.price * config.quantity;
-                matchedSignals += (sellMatched ? 1 : 0) + (buyMatched ? 1 : 0);
-                if (shouldSell) {
-                    const proceeds = point.price * config.quantity;
-                    cash += proceeds;
-                    position -= config.quantity;
-                    realizedPnL += (point.price - positionAvgCost) * config.quantity;
-                    if (position <= 0) { position = 0; positionAvgCost = 0; }
-                    totalSoldProceeds += proceeds;
-                    totalSoldQty += config.quantity;
-                    sellTrades += 1;
-                    trades.push({ date: toISODateTime(point.timestamp), action: "SELL", price: point.price, quantity: config.quantity });
-                } else if (shouldBuy) {
-                    const requiredCash = point.price * config.quantity;
-                    const prevPosition = position;
-                    const prevCostBasis = positionAvgCost;
-                    cash -= requiredCash;
-                    position += config.quantity;
-                    positionAvgCost = position > 0 ? ((prevPosition * prevCostBasis) + requiredCash) / position : 0;
-                    totalBoughtCost += requiredCash;
-                    totalBoughtQty += config.quantity;
-                    buyTrades += 1;
-                    trades.push({ date: toISODateTime(point.timestamp), action: "BUY", price: point.price, quantity: config.quantity });
                 }
             }
 
@@ -455,7 +555,23 @@ export async function runBacktest(body: BacktestRequest) {
         equityCurve.push(cash + position * point.price);
     }
 
-    const lastPrice = prices[prices.length - 1].price;
+    // If we still hold a position at the end, force-close it at the final price (liquidation)
+    const finalPoint = prices[prices.length - 1];
+    if (position > 0) {
+        const proceeds = finalPoint.price * position;
+        cash += proceeds;
+        const tradePnL = (finalPoint.price - positionAvgCost) * position;
+        realizedPnL += tradePnL;
+        totalSoldProceeds += proceeds;
+        totalSoldQty += position;
+        sellTrades += 1;
+        hasSold = true;
+        trades.push({ date: toISODateTime(finalPoint.timestamp), action: "SELL", price: finalPoint.price, quantity: position });
+        position = 0;
+        positionAvgCost = 0;
+    }
+
+    const lastPrice = finalPoint.price;
     const initialEquity = (config.initialCash ?? 1000) + ((config.initialPosition ?? 0) * firstPrice);
     const finalEquity = cash + position * lastPrice;
     const netPnL = finalEquity - initialEquity;

@@ -270,3 +270,26 @@ model PolymarketGroupedMarketSnapshot {
   @@index([market_id])
   @@index([collected_at])
 }
+
+model BacktestHistory {
+  id            Int      @id @default(autoincrement())
+  market_id     String
+  clob_token_id String?
+  market_name   String
+  group_name    String?
+  net_pnl       Float
+  return_pct    Float
+  trades_count  Int
+  start_date    String // YYYY-MM-DD
+  end_date      String // YYYY-MM-DD
+  initial_cash  Float
+  final_equity  Float
+  vs_buy_hold   Float // outperformance vs buy-and-hold
+  max_drawdown  Float
+  executed_at   DateTime @default(now())
+  created_at    DateTime @default(now())
+
+  @@index([market_id])
+  @@index([executed_at])
+  @@index([created_at])
+}
