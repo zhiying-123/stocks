@@ -1,6 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  DEFAULT_BACKTEST_RUN_TIME,
+  DEFAULT_BACKTEST_TIMEZONE,
+  formatBacktestRunTimeLabel,
+  normalizeBacktestDailyBatchSize,
+  normalizeBacktestRunTime,
+} from "@/lib/backtest-schedule";
 
 type BatchResponse = {
   success?: boolean;
@@ -43,6 +50,21 @@ type PlannedMarket = {
   liquidity: number;
 };
 
+type BacktestScheduleResponse = {
+  success?: boolean;
+  error?: string;
+  schedule?: {
+    key: string;
+    enabled: boolean;
+    dailyBatchSize: number;
+    runTime: string;
+    runTimeLabel: string;
+    timezone: string;
+    lastRunDate: string | null;
+    lastRunAt: string | null;
+  };
+};
+
 const BATCH_SIZE_OPTIONS = [5, 10, 15] as const;
 const THEME_FILTERS = [
   { label: "NBA", slug: "nba" },
@@ -53,6 +75,10 @@ const THEME_FILTERS = [
 
 export default function AdminBacktestsPage() {
   const [limit, setLimit] = useState<number>(10);
+  const [runTime, setRunTime] = useState<string>(DEFAULT_BACKTEST_RUN_TIME);
+  const [timeZone, setTimeZone] = useState<string>(DEFAULT_BACKTEST_TIMEZONE);
+  const [scheduleReady, setScheduleReady] = useState(false);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [showTokenIds, setShowTokenIds] = useState(false);
@@ -72,6 +98,39 @@ export default function AdminBacktestsPage() {
   }, [limit]);
 
   const plannedMarketCount = plannedMarkets.length;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSchedule() {
+      try {
+        const response = await fetch("/api/admin/backtest-schedule", { method: "GET" });
+        const data = (await response.json().catch(() => ({}))) as BacktestScheduleResponse;
+
+        if (!response.ok || !data.success || !data.schedule || cancelled) {
+          if (!cancelled) {
+            setScheduleReady(true);
+          }
+          return;
+        }
+
+        setLimit(normalizeBacktestDailyBatchSize(data.schedule.dailyBatchSize));
+        setRunTime(normalizeBacktestRunTime(data.schedule.runTime));
+        setTimeZone(data.schedule.timezone || DEFAULT_BACKTEST_TIMEZONE);
+        setScheduleReady(true);
+      } catch {
+        if (!cancelled) {
+          setScheduleReady(true);
+        }
+      }
+    }
+
+    void loadSchedule();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -133,6 +192,39 @@ export default function AdminBacktestsPage() {
 
   function refreshPlan() {
     setRefreshVersion((current) => current + 1);
+  }
+
+  async function saveSchedule() {
+    setScheduleSaving(true);
+
+    try {
+      const response = await fetch("/api/admin/backtest-schedule", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          enabled: true,
+          dailyBatchSize: normalizedLimit,
+          runTime,
+          timezone: timeZone,
+        }),
+      });
+
+      const data = (await response.json().catch(() => ({}))) as BacktestScheduleResponse;
+      if (!response.ok || !data.success || !data.schedule) {
+        throw new Error(data.error || "Failed to save schedule");
+      }
+
+      setLimit(normalizeBacktestDailyBatchSize(data.schedule.dailyBatchSize));
+      setRunTime(normalizeBacktestRunTime(data.schedule.runTime));
+      setTimeZone(data.schedule.timezone || DEFAULT_BACKTEST_TIMEZONE);
+      setMessage(`Auto schedule saved: ${formatBacktestRunTimeLabel(data.schedule.runTime)} · ${data.schedule.dailyBatchSize} markets per day.`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Failed to save auto schedule");
+    } finally {
+      setScheduleSaving(false);
+    }
   }
 
   function excludePlannedMarket(clobTokenId: string) {
@@ -253,7 +345,7 @@ export default function AdminBacktestsPage() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(186,230,253,0.28),transparent_38%),linear-gradient(180deg,#f8fafc_0%,#ffffff_44%,#eff6ff_100%)] px-4 py-6 md:px-8 md:py-8">
-      <section className="mx-auto max-w-7xl space-y-6 rounded-[2rem] border border-slate-200/80 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
+      <section className="mx-auto max-w-7xl space-y-6 rounded-4xl border border-slate-200/80 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Monitoring</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Polymarket Backtest Management</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
@@ -262,49 +354,85 @@ export default function AdminBacktestsPage() {
           {THEME_FILTERS.map((theme) => theme.label).join(", ")}.
         </p>
 
-        <div className="mt-5 grid grid-cols-1 gap-4 rounded-[1.5rem] border border-slate-200 bg-slate-50/80 p-4 shadow-sm md:grid-cols-[1fr_auto] md:items-end">
-          <label className="space-y-3">
-            <div>
-              <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">Daily backtests target</span>
-              <p className="mt-1 text-xs text-slate-500">Type any number from 5 to 20, or tap a quick button.</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {BATCH_SIZE_OPTIONS.map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setLimit(value)}
-                  className={`rounded-2xl border px-4 py-2 text-sm font-semibold transition ${normalizedLimit === value
-                    ? "border-sky-500 bg-sky-600 text-white shadow-sm"
-                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                    }`}
-                >
-                  {value}
-                </button>
-              ))}
-            </div>
-            <input
-              type="number"
-              min={5}
-              max={20}
-              value={limit}
-              onChange={(event) => setLimit(Number(event.target.value))}
-              className="w-full max-w-sm rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none ring-sky-200 transition focus:ring"
-              aria-label="Daily backtests target"
-            />
-          </label>
+        <div className="mt-5 rounded-3xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto] md:items-end">
+            <div className="space-y-4">
+              <label className="block space-y-3">
+                <div>
+                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">Daily backtests target</span>
+                  <p className="mt-1 text-xs text-slate-500">Type any number from 5 to 20, or tap a quick button.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {BATCH_SIZE_OPTIONS.map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setLimit(value)}
+                      className={`rounded-2xl border px-4 py-2 text-sm font-semibold transition ${normalizedLimit === value
+                        ? "border-sky-500 bg-sky-600 text-white shadow-sm"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                        }`}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number"
+                  min={5}
+                  max={20}
+                  value={limit}
+                  onChange={(event) => setLimit(Number(event.target.value))}
+                  className="w-full max-w-sm rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none ring-sky-200 transition focus:ring"
+                  aria-label="Daily backtests target"
+                />
+              </label>
 
-          <button
-            type="button"
-            onClick={runDailyBatch}
-            disabled={loading}
-            className="inline-flex items-center justify-center rounded-2xl border border-sky-300 bg-sky-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {loading ? "Running Backtests..." : `Run Batch (${normalizedLimit})`}
-          </button>
+              <label className="block space-y-3">
+                <div>
+                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">Auto-run time</span>
+                  <p className="mt-1 text-xs text-slate-500">Saved in Malaysia time. Cron checks this every minute and runs when due.</p>
+                </div>
+                <input
+                  type="time"
+                  value={runTime}
+                  onChange={(event) => setRunTime(normalizeBacktestRunTime(event.target.value))}
+                  className="w-full max-w-sm rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none ring-sky-200 transition focus:ring"
+                  aria-label="Auto-run time"
+                />
+                <p className="text-xs text-slate-500">
+                  Current setting: {formatBacktestRunTimeLabel(runTime)} · {timeZone}
+                </p>
+              </label>
+
+              <p className="text-xs text-slate-500">
+                Save this once and the daily cron will automatically run the batch at the configured time.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 md:min-w-52">
+              <button
+                type="button"
+                onClick={saveSchedule}
+                disabled={scheduleSaving || !scheduleReady}
+                className="inline-flex items-center justify-center rounded-2xl border border-emerald-300 bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {scheduleSaving ? "Saving..." : "Save Auto Schedule"}
+              </button>
+
+              <button
+                type="button"
+                onClick={runDailyBatch}
+                disabled={loading}
+                className="inline-flex items-center justify-center rounded-2xl border border-sky-300 bg-sky-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {loading ? "Running Backtests..." : `Run Batch (${normalizedLimit})`}
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div className="mt-4 rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">Theme filter</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {THEME_FILTERS.map((theme) => {
@@ -336,7 +464,7 @@ export default function AdminBacktestsPage() {
           </div>
         </div>
 
-        <div className="mt-4 rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Polymarket Backtest Management</h2>
@@ -429,7 +557,7 @@ export default function AdminBacktestsPage() {
         </div>
 
         <p className="mt-3 text-xs text-slate-500">
-          The scheduled cron job also runs daily and uses the same logic, so this page is for one-click manual trigger when needed.
+          The scheduled cron job checks the saved time every minute and runs automatically when it is due, so this page is for manual trigger and schedule updates.
         </p>
 
         {message ? (

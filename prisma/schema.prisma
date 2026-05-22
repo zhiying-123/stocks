@@ -293,3 +293,16 @@ model BacktestHistory {
   @@index([executed_at])
   @@index([created_at])
 }
+
+model BacktestSchedule {
+  schedule_id      Int       @id @default(autoincrement())
+  key              String    @unique @default("polymarket_daily_backtest")
+  enabled          Boolean   @default(true)
+  daily_batch_size Int       @default(10)
+  run_time         String    @default("15:00")
+  timezone         String    @default("Asia/Kuala_Lumpur")
+  last_run_date    String?
+  last_run_at      DateTime?
+  created_at       DateTime  @default(now())
+  updated_at       DateTime  @updatedAt
+}

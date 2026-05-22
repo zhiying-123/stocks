@@ -4,11 +4,19 @@ import prisma from "@/lib/prisma";
 import { sendDiscordMessage, sendDiscordPayload } from "@/lib/discord";
 import runBacktest from "@/lib/backtest-runner";
 import { ensureDefaultPolymarketGroups, syncPolymarketGroups } from "@/lib/polymarket-groups";
+import {
+    BACKTEST_SCHEDULE_KEY,
+    DEFAULT_BACKTEST_DAILY_BATCH_SIZE,
+    DEFAULT_BACKTEST_RUN_TIME,
+    DEFAULT_BACKTEST_TIMEZONE,
+    formatDateInTimeZone,
+    getMinutesFromRunTime,
+    getMinutesInTimeZone,
+} from "@/lib/backtest-schedule";
 
 export const maxDuration = 300; // 5 minutes max duration for Vercel
 
 const PRIORITY_GROUP_SLUGS = ["nba", "elon-tweets", "economic-policy", "movies"] as const;
-const DEFAULT_DAILY_BATCH_SIZE = 12;
 const MIN_DAILY_BATCH_SIZE = 5;
 const MAX_DAILY_BATCH_SIZE = 20;
 
@@ -68,7 +76,7 @@ function isStaffOrAdmin(role: string | undefined) {
 
 function normalizeBatchSize(raw: unknown) {
     const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) return DEFAULT_DAILY_BATCH_SIZE;
+    if (!Number.isFinite(parsed)) return DEFAULT_BACKTEST_DAILY_BATCH_SIZE;
     const rounded = Math.floor(parsed);
     if (rounded < MIN_DAILY_BATCH_SIZE) return MIN_DAILY_BATCH_SIZE;
     if (rounded > MAX_DAILY_BATCH_SIZE) return MAX_DAILY_BATCH_SIZE;
@@ -540,13 +548,101 @@ function isCronRequestAuthorized(req: NextRequest) {
     return providedSecrets.some((provided) => acceptedSecrets.includes(provided));
 }
 
+async function loadOrCreateBacktestSchedule() {
+    return prisma.backtestSchedule.upsert({
+        where: { key: BACKTEST_SCHEDULE_KEY },
+        create: {
+            key: BACKTEST_SCHEDULE_KEY,
+            enabled: true,
+            daily_batch_size: DEFAULT_BACKTEST_DAILY_BATCH_SIZE,
+            run_time: DEFAULT_BACKTEST_RUN_TIME,
+            timezone: DEFAULT_BACKTEST_TIMEZONE,
+        },
+        update: {},
+    });
+}
+
 export async function GET(req: NextRequest) {
     try {
         if (!isCronRequestAuthorized(req)) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        const batchSize = normalizeBatchSize(req.nextUrl.searchParams.get("limit"));
+        const schedule = await loadOrCreateBacktestSchedule();
+        const now = new Date();
+        const timezone = schedule.timezone || DEFAULT_BACKTEST_TIMEZONE;
+        const today = formatDateInTimeZone(now, timezone);
+        const currentMinutes = getMinutesInTimeZone(now, timezone);
+        const scheduledMinutes = getMinutesFromRunTime(schedule.run_time || DEFAULT_BACKTEST_RUN_TIME);
+
+        if (!schedule.enabled) {
+            return NextResponse.json({
+                success: true,
+                source: "cron",
+                skipped: true,
+                reason: "schedule-disabled",
+                schedule: {
+                    key: schedule.key,
+                    dailyBatchSize: schedule.daily_batch_size,
+                    runTime: schedule.run_time,
+                    timezone: schedule.timezone,
+                    lastRunDate: schedule.last_run_date,
+                    lastRunAt: schedule.last_run_at?.toISOString() ?? null,
+                },
+            });
+        }
+
+        if (schedule.last_run_date === today) {
+            return NextResponse.json({
+                success: true,
+                source: "cron",
+                skipped: true,
+                reason: "already-ran-today",
+                schedule: {
+                    key: schedule.key,
+                    dailyBatchSize: schedule.daily_batch_size,
+                    runTime: schedule.run_time,
+                    timezone: schedule.timezone,
+                    lastRunDate: schedule.last_run_date,
+                    lastRunAt: schedule.last_run_at?.toISOString() ?? null,
+                },
+            });
+        }
+
+        if (currentMinutes < scheduledMinutes) {
+            return NextResponse.json({
+                success: true,
+                source: "cron",
+                skipped: true,
+                reason: "not-due-yet",
+                schedule: {
+                    key: schedule.key,
+                    dailyBatchSize: schedule.daily_batch_size,
+                    runTime: schedule.run_time,
+                    timezone: schedule.timezone,
+                    lastRunDate: schedule.last_run_date,
+                    lastRunAt: schedule.last_run_at?.toISOString() ?? null,
+                },
+            });
+        }
+
+        const claim = await prisma.backtestSchedule.updateMany({
+            where: {
+                key: schedule.key,
+                enabled: true,
+                OR: [{ last_run_date: null }, { last_run_date: { not: today } }],
+            },
+            data: {
+                last_run_date: today,
+                last_run_at: now,
+            },
+        });
+
+        if (claim.count === 0) {
+            return NextResponse.json({ success: true, source: "cron", skipped: true, reason: "already-claimed" });
+        }
+
+        const batchSize = normalizeBatchSize(req.nextUrl.searchParams.get("limit") ?? schedule.daily_batch_size);
         const result = await runDailyBatch(req.nextUrl.origin, batchSize);
         return NextResponse.json({ success: true, source: "cron", ...result });
     } catch (error) {

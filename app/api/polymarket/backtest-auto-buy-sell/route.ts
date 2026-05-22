@@ -448,6 +448,7 @@ export async function POST(req: NextRequest) {
       cashAfter: number;
       positionAfter: number;
       triggerValue: number;
+      pnl: number;
     }> = [];
     const skippedMatches: Array<{
       date: string;
