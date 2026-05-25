@@ -78,7 +78,7 @@ const BATCH_SIZE_OPTIONS = [5, 10, 15] as const;
 const TIME_PRESETS = [
   { label: "09:00 AM", value: "09:00" },
   { label: "12:00 PM", value: "12:00" },
-  { label: "03:00 PM", value: "15:00" },
+  { label: "10:10 PM", value: "22:10" },
   { label: "08:00 PM", value: "20:00" },
 ] as const;
 const THEME_FILTERS = [

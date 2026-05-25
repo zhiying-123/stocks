@@ -1,6 +1,6 @@
 export const BACKTEST_SCHEDULE_KEY = "polymarket_daily_backtest";
 export const DEFAULT_BACKTEST_TIMEZONE = "Asia/Kuala_Lumpur";
-export const DEFAULT_BACKTEST_RUN_TIME = "15:00";
+export const DEFAULT_BACKTEST_RUN_TIME = "22:10";
 export const DEFAULT_BACKTEST_DAILY_BATCH_SIZE = 10;
 export const MIN_BACKTEST_DAILY_BATCH_SIZE = 5;
 export const MAX_BACKTEST_DAILY_BATCH_SIZE = 20;

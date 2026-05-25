@@ -10,7 +10,7 @@
         },
         {
             "path": "/api/polymarket/backtest-daily",
-            "schedule": "0 15 * * *"
+            "schedule": "10 14 * * *"
         }
     ]
 }
