@@ -594,8 +594,22 @@ async function loadOrCreateBacktestSchedule() {
 
 export async function GET(req: NextRequest) {
     try {
+        const isVercelCron = req.headers.get("x-vercel-cron") === "1";
+
+        // Diagnostic logging for cron/debugging (temporary)
+        try {
+            console.info("[BACKTEST_CRON] GET invoked", {
+                isVercelCron,
+                hasAuthorizationHeader: Boolean(req.headers.get("authorization")),
+                hasXcronSecret: Boolean(req.headers.get("x-cron-secret")),
+                querySecretPresent: Boolean(req.nextUrl.searchParams.get("secret")),
+            });
+        } catch {}
+
         if (!isCronRequestAuthorized(req)) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+            const nowDiag = new Date().toISOString();
+            console.warn("[BACKTEST_CRON] Unauthorized request blocked", { isVercelCron, at: nowDiag });
+            return NextResponse.json({ error: "Unauthorized", diagnostic: { isVercelCron, at: nowDiag } }, { status: 401 });
         }
 
         const schedule = await loadOrCreateBacktestSchedule();
@@ -610,7 +624,8 @@ export async function GET(req: NextRequest) {
                 success: true,
                 source: "cron",
                 skipped: true,
-                reason: "schedule-disabled",
+            reason: "schedule-disabled",
+            diagnostic: { isVercelCron, now: now.toISOString(), currentMinutes, scheduledMinutes },
                 schedule: {
                     key: schedule.key,
                     dailyBatchSize: schedule.daily_batch_size,
@@ -627,7 +642,8 @@ export async function GET(req: NextRequest) {
                 success: true,
                 source: "cron",
                 skipped: true,
-                reason: "already-ran-today",
+            reason: "already-ran-today",
+            diagnostic: { isVercelCron, now: now.toISOString(), currentMinutes, scheduledMinutes },
                 schedule: {
                     key: schedule.key,
                     dailyBatchSize: schedule.daily_batch_size,
@@ -644,7 +660,8 @@ export async function GET(req: NextRequest) {
                 success: true,
                 source: "cron",
                 skipped: true,
-                reason: "not-due-yet",
+            reason: "not-due-yet",
+            diagnostic: { isVercelCron, now: now.toISOString(), currentMinutes, scheduledMinutes },
                 schedule: {
                     key: schedule.key,
                     dailyBatchSize: schedule.daily_batch_size,
@@ -669,7 +686,8 @@ export async function GET(req: NextRequest) {
         });
 
         if (claim.count === 0) {
-            return NextResponse.json({ success: true, source: "cron", skipped: true, reason: "already-claimed" });
+            console.info("[BACKTEST_CRON] claim failed (already claimed)", { isVercelCron, now: new Date().toISOString() });
+            return NextResponse.json({ success: true, source: "cron", skipped: true, reason: "already-claimed", diagnostic: { isVercelCron } });
         }
 
         const batchSize = normalizeBatchSize(req.nextUrl.searchParams.get("limit") ?? schedule.daily_batch_size);
