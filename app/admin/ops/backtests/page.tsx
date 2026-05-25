@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_BACKTEST_RUN_TIME,
   DEFAULT_BACKTEST_TIMEZONE,
@@ -265,7 +265,7 @@ export default function AdminBacktestsPage() {
     setMessage("Reverted to the last saved schedule.");
   }
 
-  async function saveSchedule() {
+  const saveSchedule = useCallback(async () => {
     setScheduleSaving(true);
 
     try {
@@ -274,6 +274,7 @@ export default function AdminBacktestsPage() {
         headers: {
           "Content-Type": "application/json",
         },
+        keepalive: true,
         body: JSON.stringify({
           enabled: autoEnabled,
           dailyBatchSize: normalizedLimit,
@@ -309,7 +310,19 @@ export default function AdminBacktestsPage() {
     } finally {
       setScheduleSaving(false);
     }
-  }
+  }, [autoEnabled, normalizedLimit, runTime, timeZone]);
+
+  useEffect(() => {
+    if (!scheduleReady || !savedSchedule || !hasUnsavedChanges || scheduleSaving) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void saveSchedule();
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [hasUnsavedChanges, scheduleReady, saveSchedule, savedSchedule, scheduleSaving]);
 
   function excludePlannedMarket(clobTokenId: string) {
     setExcludedClobTokenIds((current) => {
