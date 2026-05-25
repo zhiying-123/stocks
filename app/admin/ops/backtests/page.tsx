@@ -65,6 +65,13 @@ type BacktestScheduleResponse = {
   };
 };
 
+type BacktestScheduleDraft = {
+  enabled: boolean;
+  dailyBatchSize: number;
+  runTime: string;
+  timezone: string;
+};
+
 const BATCH_SIZE_OPTIONS = [5, 10, 15] as const;
 const TIME_PRESETS = [
   { label: "09:00 AM", value: "09:00" },
@@ -86,12 +93,7 @@ export default function AdminBacktestsPage() {
   const [autoEnabled, setAutoEnabled] = useState(true);
   const [lastRunDate, setLastRunDate] = useState<string | null>(null);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
-  const [savedSchedule, setSavedSchedule] = useState<{
-    enabled: boolean;
-    dailyBatchSize: number;
-    runTime: string;
-    timezone: string;
-  } | null>(null);
+  const [savedSchedule, setSavedSchedule] = useState<BacktestScheduleDraft | null>(null);
   const [scheduleReady, setScheduleReady] = useState(false);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -253,7 +255,9 @@ export default function AdminBacktestsPage() {
   }
 
   function applyTimePreset(value: string) {
-    setRunTime(normalizeBacktestRunTime(value));
+    const nextRunTime = normalizeBacktestRunTime(value);
+    setRunTime(nextRunTime);
+    void saveSchedule({ runTime: nextRunTime });
   }
 
   function restoreSavedSchedule() {
@@ -265,8 +269,15 @@ export default function AdminBacktestsPage() {
     setMessage("Reverted to the last saved schedule.");
   }
 
-  const saveSchedule = useCallback(async () => {
+  const saveSchedule = useCallback(async (overrides: Partial<BacktestScheduleDraft> = {}) => {
     setScheduleSaving(true);
+
+    const nextSchedule: BacktestScheduleDraft = {
+      enabled: overrides.enabled ?? autoEnabled,
+      dailyBatchSize: overrides.dailyBatchSize ?? normalizedLimit,
+      runTime: normalizeBacktestRunTime(overrides.runTime ?? runTime),
+      timezone: overrides.timezone ?? timeZone,
+    };
 
     try {
       const response = await fetch("/api/admin/backtest-schedule", {
@@ -276,10 +287,10 @@ export default function AdminBacktestsPage() {
         },
         keepalive: true,
         body: JSON.stringify({
-          enabled: autoEnabled,
-          dailyBatchSize: normalizedLimit,
-          runTime,
-          timezone: timeZone,
+          enabled: nextSchedule.enabled,
+          dailyBatchSize: nextSchedule.dailyBatchSize,
+          runTime: nextSchedule.runTime,
+          timezone: nextSchedule.timezone,
         }),
       });
 
@@ -312,17 +323,23 @@ export default function AdminBacktestsPage() {
     }
   }, [autoEnabled, normalizedLimit, runTime, timeZone]);
 
-  useEffect(() => {
-    if (!scheduleReady || !savedSchedule || !hasUnsavedChanges || scheduleSaving) {
-      return;
-    }
+  function handleToggleAutoEnabled() {
+    const nextEnabled = !autoEnabled;
+    setAutoEnabled(nextEnabled);
+    void saveSchedule({ enabled: nextEnabled });
+  }
 
-    const timer = window.setTimeout(() => {
-      void saveSchedule();
-    }, 500);
+  function handleLimitChange(nextLimit: number) {
+    const normalizedNextLimit = normalizeBacktestDailyBatchSize(nextLimit);
+    setLimit(normalizedNextLimit);
+    void saveSchedule({ dailyBatchSize: normalizedNextLimit });
+  }
 
-    return () => window.clearTimeout(timer);
-  }, [hasUnsavedChanges, scheduleReady, saveSchedule, savedSchedule, scheduleSaving]);
+  function handleRunTimeChange(nextRunTime: string) {
+    const normalizedNextRunTime = normalizeBacktestRunTime(nextRunTime);
+    setRunTime(normalizedNextRunTime);
+    void saveSchedule({ runTime: normalizedNextRunTime });
+  }
 
   function excludePlannedMarket(clobTokenId: string) {
     setExcludedClobTokenIds((current) => {
@@ -474,7 +491,7 @@ export default function AdminBacktestsPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setAutoEnabled((current) => !current)}
+                    onClick={handleToggleAutoEnabled}
                     className={`inline-flex items-center rounded-full border px-4 py-2 text-sm font-semibold transition ${autoEnabled
                       ? "border-emerald-300 bg-emerald-600 text-white hover:bg-emerald-500"
                       : "border-amber-300 bg-amber-500 text-white hover:bg-amber-400"
@@ -495,7 +512,7 @@ export default function AdminBacktestsPage() {
                     <button
                       key={value}
                       type="button"
-                      onClick={() => setLimit(value)}
+                      onClick={() => handleLimitChange(value)}
                       className={`rounded-2xl border px-4 py-2 text-sm font-semibold transition ${normalizedLimit === value
                         ? "border-sky-500 bg-sky-600 text-white shadow-sm"
                         : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
@@ -510,7 +527,7 @@ export default function AdminBacktestsPage() {
                   min={5}
                   max={20}
                   value={limit}
-                  onChange={(event) => setLimit(Number(event.target.value))}
+                  onChange={(event) => handleLimitChange(Number(event.target.value))}
                   className="w-full max-w-sm rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none ring-sky-200 transition focus:ring"
                   aria-label="Daily backtests target"
                 />
@@ -539,7 +556,7 @@ export default function AdminBacktestsPage() {
                 <input
                   type="time"
                   value={runTime}
-                  onChange={(event) => setRunTime(normalizeBacktestRunTime(event.target.value))}
+                  onChange={(event) => handleRunTimeChange(event.target.value)}
                   className="w-full max-w-sm rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none ring-sky-200 transition focus:ring"
                   aria-label="Auto-run time"
                 />
@@ -556,7 +573,7 @@ export default function AdminBacktestsPage() {
             <div className="flex flex-col gap-3 md:min-w-52">
               <button
                 type="button"
-                onClick={saveSchedule}
+                onClick={() => void saveSchedule()}
                 disabled={scheduleSaving || !scheduleReady || !hasUnsavedChanges}
                 className="inline-flex items-center justify-center rounded-2xl border border-emerald-300 bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-70"
               >
