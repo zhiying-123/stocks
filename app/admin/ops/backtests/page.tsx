@@ -38,6 +38,8 @@ type BatchResponse = {
   plannedMarkets?: PlannedMarket[];
   excludedCount?: number;
   groupFilters?: string[];
+  historyPersistedCount?: number;
+  historyPersistError?: string | null;
 };
 
 type PlannedMarket = {
@@ -426,9 +428,10 @@ export default function AdminBacktestsPage() {
       });
 
       let deliveredCount = 0;
+      let summaryData: BatchResponse | null = null;
       if (summaryResponse.ok) {
-        const summaryData = await summaryResponse.json();
-        if (summaryData.success) deliveredCount = summaryData.discordDelivered || 0;
+        summaryData = await summaryResponse.json();
+        if (summaryData?.success) deliveredCount = summaryData.discordDelivered || 0;
       }
 
       // Phase 3: Final UI Update
@@ -436,7 +439,14 @@ export default function AdminBacktestsPage() {
         ...prev!,
         discordDelivered: deliveredCount,
       }));
-      setMessage(`Batch completely finished: ${completed.length} done, ${failed.length} failed. Sent to Discord.`);
+
+      if (summaryData?.historyPersistError) {
+        setMessage(`Batch finished: ${completed.length} done, ${failed.length} failed. Discord sent. History save failed: ${summaryData.historyPersistError}`);
+      } else if (typeof summaryData?.historyPersistedCount === "number") {
+        setMessage(`Batch finished: ${completed.length} done, ${failed.length} failed. Discord sent. History saved: ${summaryData.historyPersistedCount} record(s).`);
+      } else {
+        setMessage(`Batch completely finished: ${completed.length} done, ${failed.length} failed. Sent to Discord.`);
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unexpected error while running backtests");
     } finally {

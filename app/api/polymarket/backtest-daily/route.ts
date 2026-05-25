@@ -69,6 +69,22 @@ type BacktestRunFailure = {
 
 type BacktestRunResult = BacktestRunSuccess | BacktestRunFailure;
 
+type BacktestHistoryRow = {
+    market_id: string;
+    clob_token_id: string | null;
+    market_name: string;
+    group_name: string | null;
+    net_pnl: number;
+    return_pct: number;
+    trades_count: number;
+    start_date: string;
+    end_date: string;
+    initial_cash: number;
+    final_equity: number;
+    vs_buy_hold: number;
+    max_drawdown: number;
+};
+
 function isStaffOrAdmin(role: string | undefined) {
     const normalized = String(role || "").toLowerCase();
     return normalized === "staff" || normalized === "admin";
@@ -117,6 +133,15 @@ async function getAuthedUser(): Promise<StaffUser | null> {
 function getGroupPriority(slug: string) {
     const index = PRIORITY_GROUP_SLUGS.indexOf(slug as (typeof PRIORITY_GROUP_SLUGS)[number]);
     return index >= 0 ? index : PRIORITY_GROUP_SLUGS.length;
+}
+
+async function persistBacktestHistory(rows: BacktestHistoryRow[]) {
+    if (rows.length === 0) {
+        return { persistedCount: 0 };
+    }
+
+    const result = await prisma.backtestHistory.createMany({ data: rows });
+    return { persistedCount: result.count };
 }
 
 function pickBalancedCandidateMarkets(candidates: CandidateMarket[], limit: number) {
@@ -737,7 +762,7 @@ export async function POST(req: NextRequest) {
 
             // Persist completed backtests to DB (best-effort)
             try {
-                const createItems = sortedCompleted.map((item) => ({
+                const createItems: BacktestHistoryRow[] = sortedCompleted.map((item) => ({
                     market_id: item.marketId || item.clobTokenId || item.market || "",
                     clob_token_id: item.clobTokenId || null,
                     market_name: item.market,
@@ -753,16 +778,25 @@ export async function POST(req: NextRequest) {
                     max_drawdown: Number(item.maxDrawdown || 0),
                 }));
 
-                if (createItems.length > 0) {
-                    await prisma.backtestHistory.createMany({ data: createItems });
-                }
+                const { persistedCount } = await persistBacktestHistory(createItems);
+
+                return NextResponse.json({
+                    success: true,
+                    discordDelivered: delivered,
+                    historyPersistedCount: persistedCount,
+                });
             } catch (err) {
-                // Best-effort: don't fail the request if DB write fails
+                const message = err instanceof Error ? err.message : "Failed to persist backtest history";
                 // eslint-disable-next-line no-console
                 console.error("Failed to persist backtest history (sendSummary):", err);
-            }
 
-            return NextResponse.json({ success: true, discordDelivered: delivered });
+                return NextResponse.json({
+                    success: true,
+                    discordDelivered: delivered,
+                    historyPersistedCount: 0,
+                    historyPersistError: message,
+                });
+            }
         }
 
         if (body.previewOnly === true) {
@@ -788,10 +822,12 @@ export async function POST(req: NextRequest) {
 
         const result = await runDailyBatch(actualOrigin, batchSize, excludedClobTokenIds, groupFilters);
 
-        // Persist completed backtests to DB (best-effort)
+        let historyPersistedCount = 0;
+        let historyPersistError: string | null = null;
+
         try {
             const completed = (result as any).completed || [];
-            const createItems = completed.map((item: any) => ({
+            const createItems: BacktestHistoryRow[] = completed.map((item: any) => ({
                 market_id: item.marketId || item.clobTokenId || item.market || "",
                 clob_token_id: item.clobTokenId || null,
                 market_name: item.market,
@@ -807,11 +843,10 @@ export async function POST(req: NextRequest) {
                 max_drawdown: Number(item.maxDrawdown || 0),
             }));
 
-            if (createItems.length > 0) {
-                await prisma.backtestHistory.createMany({ data: createItems });
-            }
+            const persisted = await persistBacktestHistory(createItems);
+            historyPersistedCount = persisted.persistedCount;
         } catch (err) {
-            // Best-effort: log and continue
+            historyPersistError = err instanceof Error ? err.message : "Failed to persist backtest history";
             // eslint-disable-next-line no-console
             console.error("Failed to persist backtest history (manual run):", err);
         }
@@ -822,6 +857,8 @@ export async function POST(req: NextRequest) {
             requestedBy: user.name || user.email || `User ${user.id}`,
             groupFilters,
             ...result,
+            historyPersistedCount,
+            historyPersistError,
         });
     } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to run manual polymarket backtests";
