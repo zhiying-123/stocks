@@ -5,7 +5,7 @@ async function main() {
     const result = await prisma.backtestSchedule.updateMany({
         where: { key: "polymarket_daily_backtest" },
         data: {
-            run_time: "22:30",
+            run_time: "22:56",
             timezone: "Asia/Kuala_Lumpur",
             enabled: true,
         },
