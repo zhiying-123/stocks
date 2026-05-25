@@ -257,7 +257,6 @@ export default function AdminBacktestsPage() {
   function applyTimePreset(value: string) {
     const nextRunTime = normalizeBacktestRunTime(value);
     setRunTime(nextRunTime);
-    void saveSchedule({ runTime: nextRunTime });
   }
 
   function restoreSavedSchedule() {
@@ -269,15 +268,8 @@ export default function AdminBacktestsPage() {
     setMessage("Reverted to the last saved schedule.");
   }
 
-  const saveSchedule = useCallback(async (overrides: Partial<BacktestScheduleDraft> = {}) => {
+  const saveSchedule = useCallback(async () => {
     setScheduleSaving(true);
-
-    const nextSchedule: BacktestScheduleDraft = {
-      enabled: overrides.enabled ?? autoEnabled,
-      dailyBatchSize: overrides.dailyBatchSize ?? normalizedLimit,
-      runTime: normalizeBacktestRunTime(overrides.runTime ?? runTime),
-      timezone: overrides.timezone ?? timeZone,
-    };
 
     try {
       const response = await fetch("/api/admin/backtest-schedule", {
@@ -285,12 +277,11 @@ export default function AdminBacktestsPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        keepalive: true,
         body: JSON.stringify({
-          enabled: nextSchedule.enabled,
-          dailyBatchSize: nextSchedule.dailyBatchSize,
-          runTime: nextSchedule.runTime,
-          timezone: nextSchedule.timezone,
+          enabled: autoEnabled,
+          dailyBatchSize: normalizedLimit,
+          runTime: normalizeBacktestRunTime(runTime),
+          timezone: timeZone,
         }),
       });
 
@@ -324,21 +315,17 @@ export default function AdminBacktestsPage() {
   }, [autoEnabled, normalizedLimit, runTime, timeZone]);
 
   function handleToggleAutoEnabled() {
-    const nextEnabled = !autoEnabled;
-    setAutoEnabled(nextEnabled);
-    void saveSchedule({ enabled: nextEnabled });
+    setAutoEnabled((current) => !current);
   }
 
   function handleLimitChange(nextLimit: number) {
     const normalizedNextLimit = normalizeBacktestDailyBatchSize(nextLimit);
     setLimit(normalizedNextLimit);
-    void saveSchedule({ dailyBatchSize: normalizedNextLimit });
   }
 
   function handleRunTimeChange(nextRunTime: string) {
     const normalizedNextRunTime = normalizeBacktestRunTime(nextRunTime);
     setRunTime(normalizedNextRunTime);
-    void saveSchedule({ runTime: normalizedNextRunTime });
   }
 
   function excludePlannedMarket(clobTokenId: string) {
@@ -566,7 +553,7 @@ export default function AdminBacktestsPage() {
               </label>
 
               <p className="text-xs text-slate-500">
-                Save this once and the daily cron will automatically run the batch at the configured time.
+                Make your changes, then click Save Auto Schedule to store them.
               </p>
             </div>
 
