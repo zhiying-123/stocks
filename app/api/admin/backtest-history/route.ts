@@ -48,7 +48,15 @@ export async function GET(req: NextRequest) {
     if (marketId) where.market_id = { contains: marketId };
     if (groupName) where.group_name = { contains: groupName };
     
-    // Handle date range filtering correctly
+    // Handle date range filtering correctly — validate YYYY-MM-DD format first
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (startDate && !dateRegex.test(startDate)) {
+      return NextResponse.json({ error: "Invalid startDate format. Use YYYY-MM-DD" }, { status: 400 });
+    }
+    if (endDate && !dateRegex.test(endDate)) {
+      return NextResponse.json({ error: "Invalid endDate format. Use YYYY-MM-DD" }, { status: 400 });
+    }
+
     if (startDate || endDate) {
       where.executed_at = {};
       if (startDate) where.executed_at.gte = new Date(startDate);
@@ -74,7 +82,9 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     console.error("GET backtest history error:", error);
-    return NextResponse.json({ error: "Failed to fetch backtest history" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Failed to fetch backtest history";
+    // Return the error message temporarily to aid debugging
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
