@@ -78,7 +78,7 @@ const BATCH_SIZE_OPTIONS = [5, 10, 15] as const;
 const TIME_PRESETS = [
   { label: "09:00 AM", value: "09:00" },
   { label: "12:00 PM", value: "12:00" },
-  { label: "10:16 PM", value: "22:16" },
+  { label: "10:30 PM", value: "22:30" },
   { label: "08:00 PM", value: "20:00" },
 ] as const;
 const THEME_FILTERS = [
@@ -193,6 +193,36 @@ export default function AdminBacktestsPage() {
       cancelled = true;
     };
   }, []);
+
+  function refreshSchedule() {
+    setMessage("Refreshing saved schedule...");
+    void (async () => {
+      try {
+        const response = await fetch("/api/admin/backtest-schedule", { method: "GET" });
+        const data = (await response.json().catch(() => ({}))) as BacktestScheduleResponse;
+
+        if (!response.ok || !data.success || !data.schedule) {
+          throw new Error(data.error || "Failed to refresh schedule");
+        }
+
+        setLimit(normalizeBacktestDailyBatchSize(data.schedule.dailyBatchSize));
+        setRunTime(normalizeBacktestRunTime(data.schedule.runTime));
+        setTimeZone(data.schedule.timezone || DEFAULT_BACKTEST_TIMEZONE);
+        setAutoEnabled(data.schedule.enabled);
+        setLastRunDate(data.schedule.lastRunDate);
+        setLastRunAt(data.schedule.lastRunAt);
+        setSavedSchedule({
+          enabled: data.schedule.enabled,
+          dailyBatchSize: normalizeBacktestDailyBatchSize(data.schedule.dailyBatchSize),
+          runTime: normalizeBacktestRunTime(data.schedule.runTime),
+          timezone: data.schedule.timezone || DEFAULT_BACKTEST_TIMEZONE,
+        });
+        setMessage(`Refreshed: ${data.schedule.runTimeLabel}`);
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : "Failed to refresh schedule");
+      }
+    })();
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -584,6 +614,14 @@ export default function AdminBacktestsPage() {
                 className="inline-flex items-center justify-center rounded-2xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Revert Changes
+              </button>
+
+              <button
+                type="button"
+                onClick={refreshSchedule}
+                className="inline-flex items-center justify-center rounded-2xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100"
+              >
+                Refresh Schedule
               </button>
 
               <button
