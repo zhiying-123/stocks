@@ -506,7 +506,7 @@ export default function AdminBacktestsPage() {
               <label className="block space-y-3">
                 <div>
                   <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">Auto-run time</span>
-                  <p className="mt-1 text-xs text-slate-500">Saved in Malaysia time. Cron checks this every minute and runs when due.</p>
+                  <p className="mt-1 text-xs text-slate-500">Saved in Malaysia time. The daily cron runs later in the day and executes once the saved time has passed.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {TIME_PRESETS.map((preset) => (
@@ -696,7 +696,7 @@ export default function AdminBacktestsPage() {
         </div>
 
         <p className="mt-3 text-xs text-slate-500">
-          The scheduled cron job checks the saved time every minute and runs automatically when it is due, so this page is for manual trigger and schedule updates.
+          The scheduled cron job runs once per day and executes automatically after the saved time is due, so this page is for manual trigger and schedule updates.
         </p>
 
         {message ? (
