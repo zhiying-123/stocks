@@ -410,7 +410,6 @@ export async function GET(req: NextRequest) {
         const manualMode = req.nextUrl.searchParams.get("manual") === "1";
         const manualMarketId = req.nextUrl.searchParams.get("marketId")?.trim() || null;
         const manualUserId = getUserIdFromCookie(req);
-
         const acceptedSecrets = Array.from(
             new Set([
                 process.env.POLYMARKET_ALERT_CRON_SECRET,

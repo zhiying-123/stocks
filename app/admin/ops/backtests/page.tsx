@@ -194,36 +194,6 @@ export default function AdminBacktestsPage() {
     };
   }, []);
 
-  function refreshSchedule() {
-    setMessage("Refreshing saved schedule...");
-    void (async () => {
-      try {
-        const response = await fetch("/api/admin/backtest-schedule", { method: "GET" });
-        const data = (await response.json().catch(() => ({}))) as BacktestScheduleResponse;
-
-        if (!response.ok || !data.success || !data.schedule) {
-          throw new Error(data.error || "Failed to refresh schedule");
-        }
-
-        setLimit(normalizeBacktestDailyBatchSize(data.schedule.dailyBatchSize));
-        setRunTime(normalizeBacktestRunTime(data.schedule.runTime));
-        setTimeZone(data.schedule.timezone || DEFAULT_BACKTEST_TIMEZONE);
-        setAutoEnabled(data.schedule.enabled);
-        setLastRunDate(data.schedule.lastRunDate);
-        setLastRunAt(data.schedule.lastRunAt);
-        setSavedSchedule({
-          enabled: data.schedule.enabled,
-          dailyBatchSize: normalizeBacktestDailyBatchSize(data.schedule.dailyBatchSize),
-          runTime: normalizeBacktestRunTime(data.schedule.runTime),
-          timezone: data.schedule.timezone || DEFAULT_BACKTEST_TIMEZONE,
-        });
-        setMessage(`Refreshed: ${data.schedule.runTimeLabel}`);
-      } catch (err) {
-        setMessage(err instanceof Error ? err.message : "Failed to refresh schedule");
-      }
-    })();
-  }
-
   useEffect(() => {
     let cancelled = false;
 
@@ -505,9 +475,6 @@ export default function AdminBacktestsPage() {
                 <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-600">
                   Last run: {lastRunLabel}
                 </span>
-                <span className={`rounded-full border px-3 py-1 ${hasUnsavedChanges ? "border-sky-300 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600"}`}>
-                  {hasUnsavedChanges ? "Unsaved changes" : "All changes saved"}
-                </span>
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white p-3">
@@ -593,7 +560,7 @@ export default function AdminBacktestsPage() {
               </label>
 
               <p className="text-xs text-slate-500">
-                Make your changes, then click Save Auto Schedule to store them.
+                Make your changes, then click Save Schedule to store them.
               </p>
             </div>
 
@@ -601,27 +568,19 @@ export default function AdminBacktestsPage() {
               <button
                 type="button"
                 onClick={() => void saveSchedule()}
-                disabled={scheduleSaving || !scheduleReady || !hasUnsavedChanges}
+                disabled={scheduleSaving || !scheduleReady}
                 className="inline-flex items-center justify-center rounded-2xl border border-emerald-300 bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {scheduleSaving ? "Saving..." : hasUnsavedChanges ? "Save Auto Schedule" : "Saved"}
+                {scheduleSaving ? "Saving..." : "Save Schedule"}
               </button>
 
               <button
                 type="button"
                 onClick={restoreSavedSchedule}
-                disabled={!hasUnsavedChanges || !savedSchedule}
+                disabled={!savedSchedule}
                 className="inline-flex items-center justify-center rounded-2xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Revert Changes
-              </button>
-
-              <button
-                type="button"
-                onClick={refreshSchedule}
-                className="inline-flex items-center justify-center rounded-2xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100"
-              >
-                Refresh Schedule
               </button>
 
               <button

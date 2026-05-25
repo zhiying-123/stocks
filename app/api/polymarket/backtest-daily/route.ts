@@ -550,6 +550,11 @@ async function runDailyBatch(
 }
 
 function isCronRequestAuthorized(req: NextRequest) {
+    const isVercelCron = req.headers.get("x-vercel-cron") === "1";
+    if (isVercelCron) {
+        return true;
+    }
+
     const acceptedSecrets = Array.from(
         new Set(
             [process.env.POLYMARKET_BACKTEST_CRON_SECRET, process.env.CRON_SECRET].filter(

@@ -24,6 +24,7 @@ interface BacktestRecord {
 export default function BacktestHistoryPage() {
   const [records, setRecords] = useState<BacktestRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [total, setTotal] = useState(0);
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
@@ -39,6 +40,7 @@ export default function BacktestHistoryPage() {
 
   async function loadRecords() {
     setLoading(true);
+    setLoadError("");
     try {
       const params = new URLSearchParams();
       params.append("limit", limit.toString());
@@ -49,7 +51,10 @@ export default function BacktestHistoryPage() {
       if (filterEndDate) params.append("endDate", filterEndDate);
 
       const res = await fetch(`/api/admin/backtest-history?${params.toString()}`);
-      if (!res.ok) throw new Error("Failed to load records");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to load records (${res.status})`);
+      }
 
       const data = await res.json();
       setRecords(data.results || []);
@@ -57,6 +62,8 @@ export default function BacktestHistoryPage() {
     } catch (error) {
       console.error("Failed to load backtest history:", error);
       setRecords([]);
+      setTotal(0);
+      setLoadError(error instanceof Error ? error.message : "Failed to load backtest history");
     } finally {
       setLoading(false);
     }
@@ -116,6 +123,10 @@ export default function BacktestHistoryPage() {
     setFilterEndDate("");
     setOffset(0);
     setTimeout(loadRecords, 100);
+  }
+
+  function handleRefresh() {
+    loadRecords();
   }
 
   const pages = Math.ceil(total / limit);
@@ -198,6 +209,12 @@ export default function BacktestHistoryPage() {
         <div className="rounded-lg bg-green-50 p-4 text-sm text-green-700">{deleteSuccess}</div>
       )}
 
+      {loadError && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+          {loadError}
+        </div>
+      )}
+
       {/* Results table */}
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-x-auto">
         {loading ? (
@@ -278,6 +295,12 @@ export default function BacktestHistoryPage() {
             Total: <span className="font-medium">{total}</span> records (Page {currentPage}/{pages})
           </div>
           <div className="flex gap-2">
+            <button
+              onClick={handleRefresh}
+              className="rounded px-3 py-1 text-sm font-medium text-gray-600 hover:bg-gray-100"
+            >
+              Refresh
+            </button>
             <button
               onClick={() => setOffset(Math.max(0, offset - limit))}
               disabled={offset === 0}
