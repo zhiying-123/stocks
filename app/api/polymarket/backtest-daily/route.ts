@@ -604,7 +604,7 @@ export async function GET(req: NextRequest) {
                 hasXcronSecret: Boolean(req.headers.get("x-cron-secret")),
                 querySecretPresent: Boolean(req.nextUrl.searchParams.get("secret")),
             });
-        } catch {}
+        } catch { }
 
         if (!isCronRequestAuthorized(req)) {
             const nowDiag = new Date().toISOString();
@@ -624,8 +624,8 @@ export async function GET(req: NextRequest) {
                 success: true,
                 source: "cron",
                 skipped: true,
-            reason: "schedule-disabled",
-            diagnostic: { isVercelCron, now: now.toISOString(), currentMinutes, scheduledMinutes },
+                reason: "schedule-disabled",
+                diagnostic: { isVercelCron, now: now.toISOString(), currentMinutes, scheduledMinutes },
                 schedule: {
                     key: schedule.key,
                     dailyBatchSize: schedule.daily_batch_size,
@@ -642,8 +642,8 @@ export async function GET(req: NextRequest) {
                 success: true,
                 source: "cron",
                 skipped: true,
-            reason: "already-ran-today",
-            diagnostic: { isVercelCron, now: now.toISOString(), currentMinutes, scheduledMinutes },
+                reason: "already-ran-today",
+                diagnostic: { isVercelCron, now: now.toISOString(), currentMinutes, scheduledMinutes },
                 schedule: {
                     key: schedule.key,
                     dailyBatchSize: schedule.daily_batch_size,
@@ -660,8 +660,8 @@ export async function GET(req: NextRequest) {
                 success: true,
                 source: "cron",
                 skipped: true,
-            reason: "not-due-yet",
-            diagnostic: { isVercelCron, now: now.toISOString(), currentMinutes, scheduledMinutes },
+                reason: "not-due-yet",
+                diagnostic: { isVercelCron, now: now.toISOString(), currentMinutes, scheduledMinutes },
                 schedule: {
                     key: schedule.key,
                     dailyBatchSize: schedule.daily_batch_size,

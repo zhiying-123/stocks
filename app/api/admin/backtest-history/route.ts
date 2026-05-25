@@ -6,7 +6,7 @@ async function checkAdminAuth() {
   const cookieStore = await cookies();
   const isLoggedIn = cookieStore.get("auth")?.value === "true";
   const userCookie = cookieStore.get("user")?.value;
-  
+
   let user = null;
   if (userCookie) {
     try {
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
     const where: any = {};
     if (marketId) where.market_id = { contains: marketId };
     if (groupName) where.group_name = { contains: groupName };
-    
+
     // Handle date range filtering correctly — validate YYYY-MM-DD format first
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (startDate && !dateRegex.test(startDate)) {
