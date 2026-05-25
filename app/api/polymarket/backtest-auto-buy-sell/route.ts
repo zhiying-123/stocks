@@ -29,6 +29,24 @@ type PricePoint = {
   price: number;
 };
 
+type TradeLog = {
+  date: string;
+  action: AutoTradeAction;
+  price: number;
+  quantity: number;
+  cashAfter: number;
+  positionAfter: number;
+  triggerValue: number;
+  pnl: number;
+};
+
+type SkippedMatchLog = {
+  date: string;
+  reason: string;
+  price: number;
+  triggerValue: number;
+};
+
 const CLOB_API = "https://clob.polymarket.com";
 const GAMMA_API = "https://gamma-api.polymarket.com";
 
@@ -440,22 +458,8 @@ export async function POST(req: NextRequest) {
 
     let cash = config.initialCash;
     let position = config.initialPosition;
-    const trades: Array<{
-      date: string;
-      action: AutoTradeAction;
-      price: number;
-      quantity: number;
-      cashAfter: number;
-      positionAfter: number;
-      triggerValue: number;
-      pnl: number;
-    }> = [];
-    const skippedMatches: Array<{
-      date: string;
-      reason: string;
-      price: number;
-      triggerValue: number;
-    }> = [];
+    const trades: TradeLog[] = [];
+    const skippedMatches: SkippedMatchLog[] = [];
     const equityCurve: number[] = [];
     let matchedSignals = 0;
     let totalBoughtCost = 0;
@@ -522,7 +526,7 @@ export async function POST(req: NextRequest) {
               totalBoughtQty += config.quantity;
               buyTrades += 1;
               cycleMap.set(cycleIndex, { bought: true, buyTimestamp: point.timestamp, sold: false });
-              trades.push({
+              const trade: TradeLog = {
                 date: toISODateTime(point.timestamp),
                 action: "BUY",
                 price: point.price,
@@ -531,14 +535,16 @@ export async function POST(req: NextRequest) {
                 positionAfter: position,
                 triggerValue: buyTriggerForLog as number,
                 pnl: 0,
-              });
+              };
+              trades.push(trade);
             } else {
-              skippedMatches.push({
+              const skippedMatch: SkippedMatchLog = {
                 date: toISODateTime(point.timestamp),
                 reason: `Insufficient cash (need ${requiredCash.toFixed(4)}, have ${cash.toFixed(4)})`,
                 price: point.price,
                 triggerValue: buyTriggerForLog as number,
-              });
+              };
+              skippedMatches.push(skippedMatch);
             }
           }
         } else if (config.action === "SELL") {
@@ -558,7 +564,7 @@ export async function POST(req: NextRequest) {
               totalSoldQty += config.quantity;
               sellTrades += 1;
               cycleMap.set(cycleIndex, { ...(cycle || { bought: true }), sold: true, buyTimestamp: cycle?.buyTimestamp });
-              trades.push({
+              const trade: TradeLog = {
                 date: toISODateTime(point.timestamp),
                 action: "SELL",
                 price: point.price,
@@ -567,14 +573,16 @@ export async function POST(req: NextRequest) {
                 positionAfter: position,
                 triggerValue: sellTriggerForLog as number,
                 pnl: tradePnL,
-              });
+              };
+              trades.push(trade);
             } else {
-              skippedMatches.push({
+              const skippedMatch: SkippedMatchLog = {
                 date: toISODateTime(point.timestamp),
                 reason: `Insufficient position (need ${config.quantity}, have ${position})`,
                 price: point.price,
                 triggerValue: sellTriggerForLog as number,
-              });
+              };
+              skippedMatches.push(skippedMatch);
             }
           }
         } else {
@@ -596,7 +604,7 @@ export async function POST(req: NextRequest) {
             totalSoldProceeds += proceeds;
             totalSoldQty += config.quantity;
             sellTrades += 1;
-            trades.push({
+            const trade: TradeLog = {
               date: toISODateTime(point.timestamp),
               action: "SELL",
               price: point.price,
@@ -605,7 +613,8 @@ export async function POST(req: NextRequest) {
               positionAfter: position,
               triggerValue: sellTriggerForLog as number,
               pnl: tradePnL,
-            });
+            };
+            trades.push(trade);
           } else if (shouldBuy) {
             const requiredCash = point.price * config.quantity;
             const prevPosition = position;
@@ -619,7 +628,7 @@ export async function POST(req: NextRequest) {
             totalBoughtQty += config.quantity;
             buyTrades += 1;
             cycleMap.set(cycleIndex, { bought: true, buyTimestamp: point.timestamp, sold: false });
-            trades.push({
+            const trade: TradeLog = {
               date: toISODateTime(point.timestamp),
               action: "BUY",
               price: point.price,
@@ -628,21 +637,24 @@ export async function POST(req: NextRequest) {
               positionAfter: position,
               triggerValue: buyTriggerForLog as number,
               pnl: 0,
-            });
+            };
+            trades.push(trade);
           } else if (sellMatched && position < config.quantity) {
-            skippedMatches.push({
+            const skippedMatch: SkippedMatchLog = {
               date: toISODateTime(point.timestamp),
               reason: `Insufficient position for BOTH sell leg (need ${config.quantity}, have ${position})`,
               price: point.price,
               triggerValue: sellTriggerForLog as number,
-            });
+            };
+            skippedMatches.push(skippedMatch);
           } else if (buyMatched && cash < point.price * config.quantity) {
-            skippedMatches.push({
+            const skippedMatch: SkippedMatchLog = {
               date: toISODateTime(point.timestamp),
               reason: `Insufficient cash for BOTH buy leg (need ${(point.price * config.quantity).toFixed(4)}, have ${cash.toFixed(4)})`,
               price: point.price,
               triggerValue: buyTriggerForLog as number,
-            });
+            };
+            skippedMatches.push(skippedMatch);
           }
         }
 
@@ -665,7 +677,7 @@ export async function POST(req: NextRequest) {
       totalSoldProceeds += proceeds;
       totalSoldQty += position;
       sellTrades += 1;
-      trades.push({
+      const trade: TradeLog = {
         date: toISODateTime(finalPoint.timestamp),
         action: "SELL",
         price: finalPoint.price,
@@ -674,7 +686,8 @@ export async function POST(req: NextRequest) {
         positionAfter: 0,
         triggerValue: finalPoint.price,
         pnl: tradePnL,
-      });
+      };
+      trades.push(trade);
       position = 0;
       positionAvgCost = 0;
     }

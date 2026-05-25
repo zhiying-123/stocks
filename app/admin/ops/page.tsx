@@ -3,6 +3,18 @@ import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import Link from "next/link";
 
+type OpsMetrics = {
+  totalUsers: number;
+  todayNewUsers: number;
+  activeUsersCount: number;
+  abnormalUsers: number;
+  staffAccounts: number;
+  staffAdminUsers: number;
+  staffName: string;
+  loaded: boolean;
+  errorMessage: string | null;
+};
+
 function getDateRanges() {
   const now = new Date();
   const todayStart = new Date(now);
@@ -26,6 +38,84 @@ function toLocalDateTime(value: Date) {
   });
 }
 
+async function loadOpsMetrics(user: { name?: string; email?: string; role?: string }) {
+  const { now, todayStart, todayEnd, sevenDaysAgo } = getDateRanges();
+  const abnormalStatuses = new Set(["INACTIVE", "LOCKED", "PENDING", "SUSPENDED"]);
+
+  try {
+    const allUsers = await prisma.user.findMany({
+      select: {
+        u_id: true,
+        status: true,
+        role: true,
+      },
+    });
+
+    const allUserIds = allUsers.map((item) => item.u_id);
+
+    const [todayNewUsers, activeUsers7d] = await Promise.all([
+      allUserIds.length > 0
+        ? prisma.userWallet.count({
+          where: {
+            u_id: { in: allUserIds },
+            created_at: {
+              gte: todayStart,
+              lt: todayEnd,
+            },
+          },
+        })
+        : 0,
+      allUserIds.length > 0
+        ? prisma.walletTransaction.findMany({
+          where: {
+            u_id: { in: allUserIds },
+            transaction_date: {
+              gte: sevenDaysAgo,
+              lt: now,
+            },
+          },
+          select: {
+            u_id: true,
+          },
+          distinct: ["u_id"],
+        })
+        : [],
+    ]);
+
+    const staffName = user.name || user.email || "Staff User";
+    const staffAdminUsers = allUsers.filter((item) => {
+      const currentRole = String(item.role || "").toLowerCase();
+      return currentRole === "staff" || currentRole === "admin";
+    }).length;
+
+    return {
+      totalUsers: allUsers.length,
+      todayNewUsers,
+      activeUsersCount: activeUsers7d.length,
+      abnormalUsers: allUsers.filter((item) => abnormalStatuses.has(String(item.status || "").toUpperCase())).length,
+      staffAccounts: allUsers.filter((item) => String(item.role || "").toLowerCase() === "staff").length,
+      staffAdminUsers,
+      staffName,
+      loaded: true,
+      errorMessage: null,
+    } satisfies OpsMetrics;
+  } catch (error) {
+    console.error("Ops dashboard metrics load failed:", error);
+
+    return {
+      totalUsers: 0,
+      todayNewUsers: 0,
+      activeUsersCount: 0,
+      abnormalUsers: 0,
+      staffAccounts: 0,
+      staffAdminUsers: 0,
+      staffName: user.name || user.email || "Staff User",
+      loaded: false,
+      errorMessage: error instanceof Error ? error.message : "Database unavailable right now.",
+    } satisfies OpsMetrics;
+  }
+}
+
 export default async function OpsDashboardPage() {
   const cookieStore = await cookies();
   const isLoggedIn = cookieStore.get("auth")?.value === "true";
@@ -41,57 +131,8 @@ export default async function OpsDashboardPage() {
     redirect("/");
   }
 
-  const { now, todayStart, todayEnd, sevenDaysAgo } = getDateRanges();
-
-  const abnormalStatuses = new Set(["INACTIVE", "LOCKED", "PENDING", "SUSPENDED"]);
-  const allUsers = await prisma.user.findMany({
-    select: {
-      u_id: true,
-      status: true,
-      role: true,
-    },
-  });
-
-  const allUserIds = allUsers.map((item) => item.u_id);
-
-  const [todayNewUsers, activeUsers7d] = await Promise.all([
-    allUserIds.length > 0
-      ? prisma.userWallet.count({
-        where: {
-          u_id: { in: allUserIds },
-          created_at: {
-            gte: todayStart,
-            lt: todayEnd,
-          },
-        },
-      })
-      : 0,
-    allUserIds.length > 0
-      ? prisma.walletTransaction.findMany({
-        where: {
-          u_id: { in: allUserIds },
-          transaction_date: {
-            gte: sevenDaysAgo,
-            lt: now,
-          },
-        },
-        select: {
-          u_id: true,
-        },
-        distinct: ["u_id"],
-      })
-      : [],
-  ]);
-
-  const staffName = user.name || user.email || "Staff User";
-  const totalUsers = allUsers.length;
-  const staffAdminUsers = allUsers.filter((item) => {
-    const currentRole = String(item.role || "").toLowerCase();
-    return currentRole === "staff" || currentRole === "admin";
-  }).length;
-  const abnormalUsers = allUsers.filter((item) => abnormalStatuses.has(String(item.status || "").toUpperCase())).length;
-  const staffAccounts = allUsers.filter((item) => String(item.role || "").toLowerCase() === "staff").length;
-  const activeUsersCount = activeUsers7d.length;
+  const { now } = getDateRanges();
+  const metrics = await loadOpsMetrics(user);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -109,13 +150,13 @@ export default async function OpsDashboardPage() {
           </div>
           <div className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-sm shadow-sm lg:w-auto lg:min-w-80">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Current Admin</p>
-            <p className="mt-2 text-base font-semibold text-slate-900">{staffName}</p>
+            <p className="mt-2 text-base font-semibold text-slate-900">{metrics.staffName}</p>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
               <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-medium text-slate-700">
                 Role: {String(user.role || "staff").toUpperCase()}
               </span>
               <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-medium text-slate-700">
-                Staff Accounts: {staffAccounts}
+                Staff Accounts: {metrics.staffAccounts}
               </span>
               <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-600">
                 Updated {toLocalDateTime(now)}
@@ -123,12 +164,21 @@ export default async function OpsDashboardPage() {
             </div>
           </div>
         </div>
+
+        {!metrics.loaded ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
+            <p className="font-semibold">Database temporarily unavailable</p>
+            <p className="mt-1 text-xs leading-5 text-amber-800">
+              The dashboard shell is loading, but live metrics could not be fetched right now. {metrics.errorMessage}
+            </p>
+          </div>
+        ) : null}
       </section>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Total Users</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{totalUsers}</p>
+          <p className="mt-2 text-3xl font-semibold text-slate-900">{metrics.totalUsers}</p>
           <p className="mt-1 text-xs text-slate-500">All registered users</p>
           <div className="mt-4">
             <Link
@@ -142,20 +192,20 @@ export default async function OpsDashboardPage() {
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs uppercase tracking-[0.12em] text-slate-500">New Users Today</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{todayNewUsers}</p>
+          <p className="mt-2 text-3xl font-semibold text-slate-900">{metrics.todayNewUsers}</p>
           <p className="mt-1 text-xs text-slate-500">Based on newly activated wallets</p>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Active Users (7D)</p>
-          <p className="mt-2 text-3xl font-semibold text-slate-900">{activeUsersCount}</p>
+          <p className="mt-2 text-3xl font-semibold text-slate-900">{metrics.activeUsersCount}</p>
           <p className="mt-1 text-xs text-slate-500">Users with transaction activity</p>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Abnormal Accounts</p>
-          <p className={`mt-2 text-3xl font-semibold ${abnormalUsers > 0 ? "text-amber-600" : "text-slate-900"}`}>
-            {abnormalUsers}
+          <p className={`mt-2 text-3xl font-semibold ${metrics.abnormalUsers > 0 ? "text-amber-600" : "text-slate-900"}`}>
+            {metrics.abnormalUsers}
           </p>
           <p className="mt-1 text-xs text-slate-500">Locked / pending / inactive users</p>
         </div>
